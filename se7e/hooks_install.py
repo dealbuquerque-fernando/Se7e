@@ -7,9 +7,11 @@ MARKER = "se7e"
 WIRING = [
     ("SessionStart", False),
     ("UserPromptSubmit", False),
+    ("SubagentStart", False),
     ("Notification", False),
     ("Stop", False),
     ("SessionEnd", False),
+    ("SubagentStop", False),
 ]
 
 

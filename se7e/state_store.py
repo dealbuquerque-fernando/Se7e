@@ -18,13 +18,49 @@ def read_all(path: Path = STATE_FILE) -> dict:
         return {}
 
 
-def write_claude_status(status: str, path: Path = STATE_FILE) -> None:
+def _write(data: dict, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = read_all(path)
-    data["claude"] = {"status": status, "since": time.time()}
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data))
     tmp.replace(path)
+
+
+def write_claude_status(status: str, path: Path = STATE_FILE) -> None:
+    data = read_all(path)
+    data["claude"] = {"status": status, "since": time.time()}
+    _write(data, path)
+
+
+def mark_session_active(session_id: str, status: str, path: Path = STATE_FILE) -> None:
+    """SessionStart/UserPromptSubmit: this session is doing work. Tracked
+    by session_id, not just a flat status string, because a dispatched
+    subagent is its own Claude process firing the same global hooks —
+    without this, the subagent's own Stop would wipe "trabalhando" back to
+    "parado" while the main session is still actively waiting on it."""
+    data = read_all(path)
+    active = set(data.get("claude", {}).get("active_sessions", []))
+    active.add(session_id)
+    data["claude"] = {
+        "active_sessions": sorted(active),
+        "status": status,
+        "since": time.time(),
+    }
+    _write(data, path)
+
+
+def mark_session_inactive(session_id: str, path: Path = STATE_FILE) -> None:
+    """Stop/SessionEnd: only report "parado" once EVERY tracked session
+    (main session + any subagents) has stopped — a subagent finishing
+    first must not mask the main session still working."""
+    data = read_all(path)
+    active = set(data.get("claude", {}).get("active_sessions", []))
+    active.discard(session_id)
+    data["claude"] = {
+        "active_sessions": sorted(active),
+        "status": "trabalhando" if active else "parado",
+        "since": time.time(),
+    }
+    _write(data, path)
 
 
 def read_claude_status(path: Path = STATE_FILE) -> dict:

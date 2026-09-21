@@ -48,10 +48,35 @@ def test_fresh_working_status_stays_working():
         assert result["status"] == "trabalhando"
 
 
+def test_subagent_stopping_does_not_mask_main_session_still_working():
+    """The bug this whole active-session-set design exists to fix: a
+    dispatched subagent fires the same global Stop hook as the main
+    session — its own Stop must not report "parado" while the main
+    session (a different session_id) is still active."""
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "state.json"
+        state_store.mark_session_active("main-session", "trabalhando", path=path)
+        state_store.mark_session_active("subagent-1:subagent", "trabalhando", path=path)
+        state_store.mark_session_inactive("subagent-1:subagent", path=path)
+        result = state_store.read_claude_status(path=path)
+        assert result["status"] == "trabalhando"
+
+
+def test_last_session_stopping_reports_idle():
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "state.json"
+        state_store.mark_session_active("main-session", "trabalhando", path=path)
+        state_store.mark_session_inactive("main-session", path=path)
+        result = state_store.read_claude_status(path=path)
+        assert result["status"] == "parado"
+
+
 if __name__ == "__main__":
     test_roundtrip()
     test_missing_file_returns_default()
     test_corrupt_file_returns_default()
     test_stale_working_status_falls_back_to_idle()
     test_fresh_working_status_stays_working()
+    test_subagent_stopping_does_not_mask_main_session_still_working()
+    test_last_session_stopping_reports_idle()
     print("OK")

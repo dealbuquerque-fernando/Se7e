@@ -14,7 +14,8 @@ def test_install_writes_only_the_narrow_event_set():
         hooks_install.install(COMMAND, path=path)
         data = json.loads(path.read_text())
         assert set(data["hooks"].keys()) == {
-            "SessionStart", "UserPromptSubmit", "Notification", "Stop", "SessionEnd",
+            "SessionStart", "UserPromptSubmit", "SubagentStart",
+            "Notification", "Stop", "SessionEnd", "SubagentStop",
         }
         assert "PreToolUse" not in data["hooks"]
         assert "PostToolUse" not in data["hooks"]
