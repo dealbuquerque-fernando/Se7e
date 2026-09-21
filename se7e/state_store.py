@@ -26,8 +26,17 @@ def _write(data: dict, path: Path) -> None:
 
 
 def write_claude_status(status: str, path: Path = STATE_FILE) -> None:
+    """Notification only (the one event left outside the active-session
+    tracking below) — must preserve any active_sessions already tracked,
+    or a Notification firing mid-session (e.g. a permission prompt) wipes
+    that bookkeeping, and a subagent's Stop right after would then find no
+    record of the still-running main session and wrongly report "parado"."""
     data = read_all(path)
-    data["claude"] = {"status": status, "since": time.time()}
+    active_sessions = data.get("claude", {}).get("active_sessions")
+    entry = {"status": status, "since": time.time()}
+    if active_sessions:
+        entry["active_sessions"] = active_sessions
+    data["claude"] = entry
     _write(data, path)
 
 

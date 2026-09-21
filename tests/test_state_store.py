@@ -71,6 +71,22 @@ def test_last_session_stopping_reports_idle():
         assert result["status"] == "parado"
 
 
+def test_notification_mid_session_does_not_wipe_active_sessions():
+    """write_claude_status (the Notification event's own path — the one
+    event not covered by mark_session_active/inactive) must not clobber
+    active_sessions, or a subagent's Stop right after a Notification finds
+    no record of the still-running main session and wrongly reports
+    "parado"."""
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "state.json"
+        state_store.mark_session_active("main-session", "trabalhando", path=path)
+        state_store.write_claude_status("esperando voce", path=path)
+        state_store.mark_session_active("main-session:subagent", "trabalhando", path=path)
+        state_store.mark_session_inactive("main-session:subagent", path=path)
+        result = state_store.read_claude_status(path=path)
+        assert result["status"] == "trabalhando"
+
+
 if __name__ == "__main__":
     test_roundtrip()
     test_missing_file_returns_default()
@@ -79,4 +95,5 @@ if __name__ == "__main__":
     test_fresh_working_status_stays_working()
     test_subagent_stopping_does_not_mask_main_session_still_working()
     test_last_session_stopping_reports_idle()
+    test_notification_mid_session_does_not_wipe_active_sessions()
     print("OK")
