@@ -9,13 +9,14 @@ from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
 
-from . import autostart, i18n, settings_store
+from . import autostart, i18n, settings_store, ui_colors
 from .config import resource_dir
 from .floating_ui_qt import _font, _reapply_icon_after_show, _window_icon
 
@@ -178,6 +179,11 @@ class _SettingsDialog(QDialog):
         self.apply_button.setFixedHeight(30)
         self.apply_button.setMinimumWidth(82)
 
+        self.uninstall_button = QPushButton()
+        self.uninstall_button.setFont(_font(12))
+        self.uninstall_button.setFixedHeight(30)
+        self.uninstall_button.setMinimumWidth(82)
+
         apply_row = QHBoxLayout()
         apply_row.setContentsMargins(0, 0, 0, 0)
         apply_row.addWidget(
@@ -186,6 +192,11 @@ class _SettingsDialog(QDialog):
             Qt.AlignmentFlag.AlignLeft,
         )
         apply_row.addStretch()
+        apply_row.addWidget(
+            self.uninstall_button,
+            0,
+            Qt.AlignmentFlag.AlignRight,
+        )
         root.addLayout(apply_row)
 
         self.autostart_checkbox.clicked.connect(
@@ -202,6 +213,9 @@ class _SettingsDialog(QDialog):
         )
         self.apply_button.clicked.connect(
             self.owner._on_apply_restart
+        )
+        self.uninstall_button.clicked.connect(
+            self._confirm_uninstall
         )
 
         self.reload_values()
@@ -309,6 +323,7 @@ class _SettingsDialog(QDialog):
             strings["settings_orientation_note"]
         )
         self.apply_button.setText(strings["settings_apply"])
+        self.uninstall_button.setText(strings["settings_uninstall"])
 
         current_theme = self.theme_combo.currentData()
         self.theme_combo.blockSignals(True)
@@ -433,6 +448,25 @@ class _SettingsDialog(QDialog):
         self.orientation_note.setStyleSheet(
             f"color: {colors['muted']};"
         )
+        # Same red as a disconnected status dot elsewhere in the app —
+        # the one existing "something serious" accent color, reused here
+        # to set this apart from the plain Apply button.
+        self.uninstall_button.setStyleSheet(
+            f"QPushButton {{ color: {ui_colors.DISCONNECTED_COLOR}; }}"
+        )
+
+    def _confirm_uninstall(self) -> None:
+        strings = i18n.STRINGS.get(
+            self.owner.lang,
+            i18n.STRINGS[i18n.DEFAULT_LANGUAGE],
+        )
+        answer = QMessageBox.question(
+            self,
+            strings["settings_uninstall_confirm_title"],
+            strings["settings_uninstall_confirm_body"],
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.owner._on_uninstall()
 
 
 class SettingsWindow:
@@ -441,6 +475,7 @@ class SettingsWindow:
         title: str = "Se7e",
         lang: str = i18n.DEFAULT_LANGUAGE,
         on_apply_restart=None,
+        on_uninstall=None,
     ) -> None:
         self.title = title
         self.lang = (
@@ -451,6 +486,9 @@ class SettingsWindow:
         self.window: _SettingsDialog | None = None
         self._on_apply_restart = (
             on_apply_restart or (lambda: None)
+        )
+        self._on_uninstall = (
+            on_uninstall or (lambda: None)
         )
 
     def toggle(self) -> None:

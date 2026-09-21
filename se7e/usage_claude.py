@@ -1,5 +1,7 @@
+import getpass
 import json
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -7,6 +9,7 @@ from pathlib import Path
 
 ENDPOINT = "https://api.anthropic.com/api/oauth/usage"
 CREDENTIALS_PATH = Path.home() / ".claude" / ".credentials.json"
+KEYCHAIN_SERVICE = "Claude Code-credentials"
 REFRESH_MARGIN_SECONDS = 60
 REFRESH_TIMEOUT_SECONDS = 15
 RATE_LIMIT_BACKOFF_FLOOR_SECONDS = 60
@@ -16,12 +19,64 @@ _rate_limit_until = 0.0
 _rate_limit_backoff = 0
 
 
-def read_access_token(path: Path = CREDENTIALS_PATH):
-    if not path.exists():
+def _read_credentials_from_keychain() -> dict | None:
+    """macOS only: Claude Code stores its OAuth credential (same JSON shape
+    as .credentials.json — a claudeAiOauth object with accessToken etc.) in
+    the login Keychain instead of a file, unless it fell back to writing
+    the file itself (e.g. Keychain locked in an SSH session — the file is
+    checked first, above, so that case is already covered)."""
+    if sys.platform != "darwin":
         return None
     try:
-        data = json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError):
+        result = subprocess.run(
+            [
+                "security", "find-generic-password",
+                "-a", getpass.getuser(),
+                "-s", KEYCHAIN_SERVICE,
+                "-w",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
+# A file that exists but holds valid JSON `null` must still reach the
+# .get() calls below and raise AttributeError — that's a deliberate signal
+# of a corrupted credentials file, not "no credentials". This sentinel
+# marks the "nothing readable at all" case instead of reusing None, which
+# is also json.loads('null')'s legitimate return value.
+_NO_CREDENTIALS = object()
+
+
+def _read_credentials(path: Path):
+    if path.exists():
+        try:
+            return json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return _NO_CREDENTIALS
+    # Only fall back to the real Keychain for the real default path — a
+    # test passing its own (missing-on-purpose) path must still get
+    # nothing, not a query against this machine's actual Claude Code
+    # credential.
+    if path == CREDENTIALS_PATH:
+        keychain_data = _read_credentials_from_keychain()
+        if keychain_data is not None:
+            return keychain_data
+    return _NO_CREDENTIALS
+
+
+def read_access_token(path: Path = CREDENTIALS_PATH):
+    data = _read_credentials(path)
+    if data is _NO_CREDENTIALS:
         return None
     oauth = data.get("claudeAiOauth", data)
     return oauth.get("accessToken")
@@ -29,11 +84,8 @@ def read_access_token(path: Path = CREDENTIALS_PATH):
 
 def read_expires_at(path: Path = CREDENTIALS_PATH):
     """Seconds since epoch the current access token expires at, or None if unknown."""
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError):
+    data = _read_credentials(path)
+    if data is _NO_CREDENTIALS:
         return None
     oauth = data.get("claudeAiOauth", data)
     expires_at_ms = oauth.get("expiresAt")

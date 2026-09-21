@@ -83,7 +83,11 @@ class App:
         self.popup = TrayPopup(
             self.toggle_floating, self.toggle_transparent, self.quit, lang=self.lang, theme=self.theme
         )
-        self.settings = SettingsWindow(lang=self.lang, on_apply_restart=self.apply_and_restart)
+        self.settings = SettingsWindow(
+            lang=self.lang,
+            on_apply_restart=self.apply_and_restart,
+            on_uninstall=self.uninstall_and_quit,
+        )
         self.icon = pystray.Icon(
             "se7e",
             make_icon_image(ui_colors.color_for_status("parado")),
@@ -157,6 +161,24 @@ class App:
             )
         except OSError:
             pass  # ponytail: a failed relaunch still shouldn't trap the user in a dead app
+        self.quit()
+
+    def uninstall_and_quit(self) -> None:
+        """The Settings "Desinstalar" button: remove this app's Claude Code
+        hooks and autostart entry, then quit. There's no OS-level uninstall
+        event to hang this off of on every platform (a plain .app dragged
+        to the Trash on macOS runs no code at all), so this in-app action
+        is the actual uninstall hook — the user finishes by removing the
+        app itself, same as the installer's uninstaller does on Windows."""
+        try:
+            hooks_install.uninstall()
+        except OSError:
+            pass
+        try:
+            if autostart.is_enabled():
+                autostart.disable()
+        except OSError:
+            pass
         self.quit()
 
     def toggle_transparent(self) -> None:
@@ -240,11 +262,20 @@ class App:
             name="se7e-poll",
             daemon=True,
         ).start()
-        threading.Thread(
-            target=self.icon.run,
-            name="se7e-pystray",
-            daemon=True,
-        ).start()
+        # macOS's AppKit (which draws the menu-bar status item) only
+        # tolerates being driven from the main thread — icon.run() here in
+        # a background thread is fine on Windows, but on macOS it crashes
+        # as soon as the icon is torn down (confirmed live: SIGILL inside
+        # -[NSStatusItem _uninstall], called from the se7e-pystray thread
+        # during quit/Apply-restart). run_detached() in run() below is
+        # pystray's own documented way to hand the icon to another
+        # toolkit's main-thread loop instead of running its own.
+        if sys.platform != "darwin":
+            threading.Thread(
+                target=self.icon.run,
+                name="se7e-pystray",
+                daemon=True,
+            ).start()
 
     def run(self) -> None:
         qt_app = QApplication.instance() or QApplication(sys.argv)
@@ -262,6 +293,13 @@ class App:
 
         try:
             self._start_background_tasks()
+            if sys.platform == "darwin":
+                # Registers the status item without starting pystray's own
+                # native run loop — it shares the same NSApplication that
+                # qt_app.exec() below is about to drive on this (the main)
+                # thread, so both the tray icon and every Qt window get
+                # their events pumped from the one loop.
+                self.icon.run_detached()
             qt_app.exec()
         finally:
             self.shutdown_event.set()

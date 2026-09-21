@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import ctypes
 import json
+import sys
 from dataclasses import dataclass
-from ctypes import wintypes
 
 from PySide6.QtCore import QRectF, Qt, QTimer
 from PySide6.QtGui import (
@@ -24,6 +23,32 @@ from PySide6.QtWidgets import QApplication, QWidget
 
 from . import i18n, ui_colors
 from .config import FLOATING_POSITION_FILE, resource_dir
+from .geometry_types import WindowRect
+
+if sys.platform == "darwin":
+    from .platform_mac import (
+        _cursor_position,
+        _force_topmost,
+        _set_joins_all_spaces,
+        _set_native_geometry,
+        monitor_rect_for_point,
+        read_window_rect,
+        taskbar_thickness_for_point,
+        work_area_for_point,
+    )
+elif sys.platform == "win32":
+    from .platform_win import (
+        _cursor_position,
+        _force_topmost,
+        _set_joins_all_spaces,
+        _set_native_geometry,
+        monitor_rect_for_point,
+        read_window_rect,
+        taskbar_thickness_for_point,
+        work_area_for_point,
+    )
+else:
+    raise NotImplementedError(f"se7e.floating_ui_qt has no native backend for {sys.platform!r}")
 
 _ICON_PATH = resource_dir() / "assets" / "se7e_icon_v2.ico"
 
@@ -53,70 +78,6 @@ RIGHT_MARGIN = 20
 BOTTOM_MARGIN = 60
 CORNER_RADIUS = 14
 
-MONITOR_DEFAULTTONEAREST = 2
-
-_HWND_TOPMOST = -1
-_SWP_NOMOVE = 0x0002
-_SWP_NOSIZE = 0x0001
-_SWP_NOACTIVATE = 0x0010
-
-_user32 = ctypes.WinDLL("user32", use_last_error=True)
-
-_get_window_rect = _user32.GetWindowRect
-_get_window_rect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
-_get_window_rect.restype = wintypes.BOOL
-
-_set_window_pos = _user32.SetWindowPos
-_set_window_pos.argtypes = [
-    wintypes.HWND,
-    wintypes.HWND,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.c_int,
-    wintypes.UINT,
-]
-_set_window_pos.restype = wintypes.BOOL
-
-_get_cursor_pos = _user32.GetCursorPos
-_get_cursor_pos.argtypes = [ctypes.POINTER(wintypes.POINT)]
-_get_cursor_pos.restype = wintypes.BOOL
-
-
-class _MonitorInfo(ctypes.Structure):
-    _fields_ = [
-        ("cbSize", wintypes.DWORD),
-        ("rcMonitor", wintypes.RECT),
-        ("rcWork", wintypes.RECT),
-        ("dwFlags", wintypes.DWORD),
-    ]
-
-
-_monitor_from_point = _user32.MonitorFromPoint
-_monitor_from_point.argtypes = [wintypes.POINT, wintypes.DWORD]
-_monitor_from_point.restype = ctypes.c_void_p
-
-_get_monitor_info = _user32.GetMonitorInfoW
-_get_monitor_info.argtypes = [ctypes.c_void_p, ctypes.POINTER(_MonitorInfo)]
-_get_monitor_info.restype = wintypes.BOOL
-
-
-@dataclass(frozen=True)
-class WindowRect:
-    left: int
-    top: int
-    right: int
-    bottom: int
-
-    @property
-    def width(self) -> int:
-        return self.right - self.left
-
-    @property
-    def height(self) -> int:
-        return self.bottom - self.top
-
-
 @dataclass(frozen=True)
 class ScreenGeometry:
     x: int
@@ -126,41 +87,6 @@ class ScreenGeometry:
     scale: float | None
     physical_width: int | None
     physical_height: int | None
-
-
-def _monitor_info_for_point(x: int, y: int) -> _MonitorInfo:
-    handle = _monitor_from_point(
-        wintypes.POINT(x, y),
-        MONITOR_DEFAULTTONEAREST,
-    )
-    info = _MonitorInfo()
-    info.cbSize = ctypes.sizeof(_MonitorInfo)
-    if not _get_monitor_info(handle, ctypes.byref(info)):
-        raise OSError(ctypes.get_last_error(), "GetMonitorInfoW failed")
-    return info
-
-
-def work_area_for_point(x: int, y: int) -> WindowRect:
-    """Usable monitor bounds in physical pixels."""
-    rect = _monitor_info_for_point(x, y).rcWork
-    return WindowRect(rect.left, rect.top, rect.right, rect.bottom)
-
-
-def taskbar_thickness_for_point(x: int, y: int) -> int:
-    """Taskbar thickness in physical pixels."""
-    info = _monitor_info_for_point(x, y)
-    monitor = info.rcMonitor
-    work = info.rcWork
-
-    height_diff = (
-        (monitor.bottom - monitor.top)
-        - (work.bottom - work.top)
-    )
-    width_diff = (
-        (monitor.right - monitor.left)
-        - (work.right - work.left)
-    )
-    return max(height_diff, width_diff)
 
 
 def _dpi_scale(screen) -> tuple[float, float]:
@@ -291,61 +217,6 @@ def load_position(
         return int(data["x"]), int(data["y"])
     except (OSError, ValueError, KeyError, TypeError):
         return None
-
-
-def read_window_rect(widget: QWidget) -> WindowRect:
-    rect = wintypes.RECT()
-    hwnd = int(widget.winId())
-
-    if not _get_window_rect(hwnd, ctypes.byref(rect)):
-        raise OSError(
-            ctypes.get_last_error(),
-            "GetWindowRect failed",
-        )
-
-    return WindowRect(
-        rect.left,
-        rect.top,
-        rect.right,
-        rect.bottom,
-    )
-
-
-def _set_native_geometry(
-    widget: QWidget,
-    x: int,
-    y: int,
-    width: int,
-    height: int,
-) -> None:
-    _set_window_pos(
-        int(widget.winId()),
-        _HWND_TOPMOST,
-        round(x),
-        round(y),
-        round(width),
-        round(height),
-        _SWP_NOACTIVATE,
-    )
-
-
-def _force_topmost(widget: QWidget) -> None:
-    _set_window_pos(
-        int(widget.winId()),
-        _HWND_TOPMOST,
-        0,
-        0,
-        0,
-        0,
-        _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE,
-    )
-
-
-def _cursor_position() -> tuple[int, int]:
-    point = wintypes.POINT()
-    if not _get_cursor_pos(ctypes.byref(point)):
-        raise OSError(ctypes.get_last_error(), "GetCursorPos failed")
-    return point.x, point.y
 
 
 _FONT_FAMILY: str | None = None
@@ -546,6 +417,7 @@ class FloatingWidget(QWidget):
         self.show()
         _reapply_icon_after_show(self)
         _force_topmost(self)
+        _set_joins_all_spaces(self)
 
         self._blink_timer = QTimer(self)
         self._blink_timer.setInterval(300)
@@ -564,22 +436,16 @@ class FloatingWidget(QWidget):
         query_y = int(phys_y + phys_height - 10)
 
         try:
-            info = _monitor_info_for_point(query_x, query_y)
-            monitor = info.rcMonitor
+            monitor = monitor_rect_for_point(query_x, query_y)
             work = work_area_for_point(query_x, query_y)
         except OSError:
-            monitor = wintypes.RECT(
+            monitor = WindowRect(
                 round(phys_x),
                 round(phys_y),
                 round(phys_x + phys_width),
                 round(phys_y + phys_height),
             )
-            work = WindowRect(
-                monitor.left,
-                monitor.top,
-                monitor.right,
-                monitor.bottom,
-            )
+            work = monitor
 
         saved = load_position()
         if saved is not None:

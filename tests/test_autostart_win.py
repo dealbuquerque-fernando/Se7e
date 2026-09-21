@@ -1,9 +1,12 @@
 import sys
-import winreg
 from pathlib import Path
 
+import pytest
+
+winreg = pytest.importorskip("winreg", reason="Windows Run-key autostart only exists on Windows")
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from se7e import autostart
+from se7e import autostart_win as autostart
 
 # A throwaway HKCU subkey, never the real Run key, so tests never touch the
 # machine's actual autostart entry.

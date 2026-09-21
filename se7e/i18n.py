@@ -26,7 +26,7 @@ STRINGS = {
         "status_not_connected": "nao conectado",
         "status_placeholder": "--",
         "settings_title": "Configurações",
-        "settings_autostart": "Inicializar com Windows",
+        "settings_autostart": "Inicializar com o sistema",
         "settings_apply": "Aplicar",
         "settings_language": "Idioma",
         "settings_language_note": "O painel principal e o flutuante usam o novo idioma na proxima vez que abrirem.",
@@ -37,6 +37,9 @@ STRINGS = {
         "settings_orientation_horizontal": "Horizontal",
         "settings_orientation_vertical": "Vertical",
         "settings_orientation_note": "O painel flutuante usa a orientacao nova na proxima vez que abrir.",
+        "settings_uninstall": "Desinstalar",
+        "settings_uninstall_confirm_title": "Desinstalar Se7e",
+        "settings_uninstall_confirm_body": "Isso remove os hooks do Claude Code e desativa a inicializacao automatica, e fecha o Se7e. Depois, arraste o app para a Lixeira para concluir. Continuar?",
     },
     "en": {
         "tray_menu_main_panel": "Main panel",
@@ -58,7 +61,7 @@ STRINGS = {
         "status_not_connected": "not connected",
         "status_placeholder": "--",
         "settings_title": "Settings",
-        "settings_autostart": "Start with Windows",
+        "settings_autostart": "Start with the system",
         "settings_apply": "Apply",
         "settings_language": "Language",
         "settings_language_note": "The main panel and floating pill pick up the new language the next time they open.",
@@ -69,6 +72,9 @@ STRINGS = {
         "settings_orientation_horizontal": "Horizontal",
         "settings_orientation_vertical": "Vertical",
         "settings_orientation_note": "The floating pill uses the new orientation the next time it opens.",
+        "settings_uninstall": "Uninstall",
+        "settings_uninstall_confirm_title": "Uninstall Se7e",
+        "settings_uninstall_confirm_body": "This removes Se7e's Claude Code hooks, disables autostart, and quits Se7e. Afterwards, drag the app to the Trash to finish. Continue?",
     },
 }
 

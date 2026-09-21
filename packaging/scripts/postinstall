@@ -1,0 +1,38 @@
+#!/bin/bash
+# Runs as root during .pkg installation (that's how Installer.app always
+# runs package scripts). install-hooks needs to write into the real
+# logged-in user's ~/.claude/settings.json, not root's — so this resolves
+# the console user and re-invokes the just-installed binary as them,
+# rather than running install-hooks directly here as root.
+#
+# This is the automatic step installer.iss's own [Run] section performs
+# on Windows via "Se7e.exe install-hooks" right after install.
+set -e
+
+# $2 is the actual install location Installer.app used for this run — not
+# always /Applications: if a bundle with this same identifier already
+# exists elsewhere (findable via Spotlight), the installer silently
+# relocates the install there instead. Confirmed live: a leftover
+# dist/Se7e.app from a local PyInstaller build got picked over
+# /Applications this way, and a hardcoded /Applications path here then
+# failed with "command not found" since nothing had actually landed there.
+INSTALL_LOCATION="${2:-/Applications}"
+APP_BINARY="${INSTALL_LOCATION%/}/Se7e.app/Contents/MacOS/Se7e"
+CONSOLE_USER="$(stat -f%Su /dev/console)"
+
+if [ -z "$CONSOLE_USER" ] || [ "$CONSOLE_USER" = "root" ]; then
+    # No real logged-in user to install hooks for (e.g. an unattended/MDM
+    # install) — nothing safe to do here, so skip quietly rather than
+    # writing into root's own home directory by mistake.
+    exit 0
+fi
+
+if [ ! -x "$APP_BINARY" ]; then
+    # Nothing landed where expected — don't fail the whole install over it.
+    exit 0
+fi
+
+USER_ID="$(id -u "$CONSOLE_USER")"
+launchctl asuser "$USER_ID" sudo -u "$CONSOLE_USER" "$APP_BINARY" install-hooks || true
+
+exit 0

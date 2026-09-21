@@ -111,11 +111,17 @@ def test_get_usage_backs_off_after_429_and_skips_the_next_call():
         path.write_text(json.dumps({
             "claudeAiOauth": {"accessToken": "abc", "expiresAt": (time.time() + 999999) * 1000}
         }))
-        original_path = usage_claude.CREDENTIALS_PATH
+        # read_access_token()/read_expires_at() default their `path` argument
+        # to CREDENTIALS_PATH at function-definition time, so reassigning
+        # that module attribute here wouldn't reach get_usage()'s own calls
+        # to them — only patching the functions themselves does.
+        original_read_token = usage_claude.read_access_token
+        original_read_expires = usage_claude.read_expires_at
         original_until = usage_claude._rate_limit_until
         original_backoff = usage_claude._rate_limit_backoff
         original_fetch = usage_claude.fetch_usage
-        usage_claude.CREDENTIALS_PATH = path
+        usage_claude.read_access_token = lambda: original_read_token(path)
+        usage_claude.read_expires_at = lambda: original_read_expires(path)
         usage_claude._rate_limit_until = 0.0
         usage_claude._rate_limit_backoff = 0
         calls = []
@@ -137,7 +143,8 @@ def test_get_usage_backs_off_after_429_and_skips_the_next_call():
             assert len(calls) == 1
         finally:
             usage_claude.fetch_usage = original_fetch
-            usage_claude.CREDENTIALS_PATH = original_path
+            usage_claude.read_access_token = original_read_token
+            usage_claude.read_expires_at = original_read_expires
             usage_claude._rate_limit_until = original_until
             usage_claude._rate_limit_backoff = original_backoff
 
@@ -148,11 +155,13 @@ def test_get_usage_success_resets_backoff():
         path.write_text(json.dumps({
             "claudeAiOauth": {"accessToken": "abc", "expiresAt": (time.time() + 999999) * 1000}
         }))
-        original_path = usage_claude.CREDENTIALS_PATH
+        original_read_token = usage_claude.read_access_token
+        original_read_expires = usage_claude.read_expires_at
         original_until = usage_claude._rate_limit_until
         original_backoff = usage_claude._rate_limit_backoff
         original_fetch = usage_claude.fetch_usage
-        usage_claude.CREDENTIALS_PATH = path
+        usage_claude.read_access_token = lambda: original_read_token(path)
+        usage_claude.read_expires_at = lambda: original_read_expires(path)
         usage_claude._rate_limit_until = 0.0
         usage_claude._rate_limit_backoff = 30  # pretend a previous 429 already happened
 
@@ -164,7 +173,8 @@ def test_get_usage_success_resets_backoff():
             assert usage_claude._rate_limit_until == 0.0
         finally:
             usage_claude.fetch_usage = original_fetch
-            usage_claude.CREDENTIALS_PATH = original_path
+            usage_claude.read_access_token = original_read_token
+            usage_claude.read_expires_at = original_read_expires
             usage_claude._rate_limit_until = original_until
             usage_claude._rate_limit_backoff = original_backoff
 
