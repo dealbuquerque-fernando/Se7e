@@ -16,9 +16,13 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def _launch_pieces() -> tuple[str, str]:
-    """(python executable to use, inline code to run) — shared by the Run-key
-    command string and by a direct process relaunch (Settings' Apply button)."""
+def _launch_pieces() -> tuple[str, str | None]:
+    """(executable to use, inline code to run or None) — shared by the
+    Run-key command string and by a direct process relaunch (Settings'
+    Apply button). A PyInstaller build's sys.executable IS the installed
+    Se7e.exe, which already runs the app bare — no "-c" needed there."""
+    if getattr(sys, "frozen", False):
+        return sys.executable, None
     exe = sys.executable
     windowless = exe.replace("python.exe", "pythonw.exe")
     if windowless != exe and Path(windowless).exists():
@@ -32,15 +36,18 @@ def _launch_pieces() -> tuple[str, str]:
 
 
 def launch_args() -> list[str]:
-    """[executable, "-c", code] — safe to pass straight to subprocess.Popen,
-    no shell involved."""
+    """Safe to pass straight to subprocess.Popen, no shell involved."""
     exe, code = _launch_pieces()
+    if code is None:
+        return [exe]
     return [exe, "-c", code]
 
 
 def run_key_command() -> str:
     """The same launch, quoted as a single string for the registry Run key."""
     exe, code = _launch_pieces()
+    if code is None:
+        return f'"{exe}"'
     return f'"{exe}" -c "{code}"'
 
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -18,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import autostart, i18n, settings_store
+from .config import resource_dir
 from .floating_ui_qt import _font, _reapply_icon_after_show, _window_icon
 
 
@@ -55,7 +54,7 @@ THEMES = {
 }
 
 
-_ASSETS_DIR = Path(__file__).with_name("assets")
+_ASSETS_DIR = resource_dir() / "assets"
 
 # QCheckBox::indicator:checked { image: url(...) } — styling the indicator
 # at all (border/background) makes Qt stop drawing its own native checkmark

@@ -10,14 +10,14 @@ from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
-from . import autostart, hooks_install, i18n, settings_store, state_store, ui_colors, usage_claude, usage_codex
+from . import autostart, config, hooks_install, i18n, settings_store, state_store, ui_colors, usage_claude, usage_codex
 from .floating_ui_qt import FloatingWidget
 from .settings_window_qt import SettingsWindow
 from .tray_ui_qt import TrayPopup, make_icon_image
 
 USAGE_POLL_SECONDS = 45
 STATUS_POLL_SECONDS = 2
-_ICON_PATH = Path(__file__).with_name("assets") / "se7e_icon_v2.ico"
+_ICON_PATH = config.resource_dir() / "assets" / "se7e_icon_v2.ico"
 
 # Without a distinct AppUserModelID, Windows groups this taskbar entry under
 # python.exe's own generic identity instead of this app's — it then falls
@@ -46,6 +46,11 @@ class _QtInvoker(QObject):
 
 
 def hook_command() -> str:
+    # Frozen (PyInstaller) build: the exe itself has a hidden "hook"
+    # subcommand (see main() below), so there's no python.exe or loose
+    # hook.py file needed on the machine that installed the app.
+    if getattr(sys, "frozen", False):
+        return f'"{sys.executable}" hook'
     hook_script = str(Path(__file__).with_name("hook.py"))
     return f'"{sys.executable}" "{hook_script}"'
 
@@ -257,6 +262,11 @@ def main() -> None:
         return
     if len(sys.argv) > 1 and sys.argv[1] == "uninstall-hooks":
         print(hooks_install.uninstall())
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "hook":
+        from . import hook
+
+        hook.main(sys.argv[2] if len(sys.argv) > 2 else "")
         return
     App().run()
 

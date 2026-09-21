@@ -5,7 +5,6 @@ from __future__ import annotations
 import ctypes
 import json
 from dataclasses import dataclass
-from pathlib import Path
 from ctypes import wintypes
 
 from PySide6.QtCore import QRectF, Qt, QTimer
@@ -24,9 +23,9 @@ from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication, QWidget
 
 from . import i18n, ui_colors
-from .config import FLOATING_POSITION_FILE
+from .config import FLOATING_POSITION_FILE, resource_dir
 
-_ICON_PATH = Path(__file__).with_name("assets") / "se7e_icon_v2.ico"
+_ICON_PATH = resource_dir() / "assets" / "se7e_icon_v2.ico"
 
 
 def _window_icon() -> QIcon:
@@ -356,7 +355,7 @@ def _font(pixel_size: int, bold: bool = False) -> QFont:
     global _FONT_FAMILY
 
     if _FONT_FAMILY is None:
-        assets = Path(__file__).with_name("assets")
+        assets = resource_dir() / "assets"
         regular_id = QFontDatabase.addApplicationFont(
             str(assets / "Inconsolata-Regular.ttf")
         )

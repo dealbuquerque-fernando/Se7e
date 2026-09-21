@@ -20,8 +20,9 @@ def status_for_event(event: str):
     return EVENT_STATUS.get(event)
 
 
-def main() -> None:
-    event = sys.argv[1] if len(sys.argv) > 1 else ""
+def main(event: str | None = None) -> None:
+    if event is None:
+        event = sys.argv[1] if len(sys.argv) > 1 else ""
     status = status_for_event(event)
     if status is None:
         return

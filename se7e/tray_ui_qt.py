@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ctypes
 from dataclasses import dataclass
-from pathlib import Path
 from ctypes import wintypes
 
 from PIL import Image, ImageDraw, ImageFont
@@ -13,6 +12,7 @@ from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen, QRadialGradient
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QWidget
 
 from . import i18n, ui_colors
+from .config import resource_dir
 from .floating_ui_qt import (
     ScreenGeometry,
     WindowRect,
@@ -118,10 +118,7 @@ def _bar_percentage(value, connected: bool) -> float:
     return max(0, min(100, float(value)))
 
 
-_ICON_FONT_PATH = (
-    Path(__file__).with_name("assets")
-    / "Inconsolata-Bold.ttf"
-)
+_ICON_FONT_PATH = resource_dir() / "assets" / "Inconsolata-Bold.ttf"
 
 
 def make_icon_image(color: str, size: int = 32):
