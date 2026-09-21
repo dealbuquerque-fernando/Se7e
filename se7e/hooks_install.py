@@ -19,7 +19,11 @@ def settings_path() -> Path:
 
 def _is_ours(entry: dict) -> bool:
     for h in entry.get("hooks", []):
-        if MARKER in h.get("command", ""):
+        # Case-insensitive: the dev-mode hook path is all-lowercase
+        # ("se7e\hook.py"), but the installed exe's own folder/filename is
+        # capitalized ("Programs\Se7e\Se7e.exe") — a case-sensitive match
+        # silently finds nothing to uninstall against an installed build.
+        if MARKER in h.get("command", "").lower():
             return True
     return False
 
