@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import ctypes
 from dataclasses import dataclass
-from ctypes import wintypes
 
 from PIL import Image, ImageDraw, ImageFont
 from PySide6.QtCore import QRectF, Qt, QTimer
@@ -16,6 +14,7 @@ from .config import resource_dir
 from .floating_ui_qt import (
     ScreenGeometry,
     WindowRect,
+    _cursor_position,
     _dpi_scale,
     _font,
     _force_topmost,
@@ -34,11 +33,6 @@ COLLAPSED_HEIGHT = 169
 CORNER_RADIUS = 14
 TRAY_EDGE_MARGIN = 7
 
-_user32 = ctypes.WinDLL("user32", use_last_error=True)
-_get_cursor_pos = _user32.GetCursorPos
-_get_cursor_pos.argtypes = [ctypes.POINTER(wintypes.POINT)]
-_get_cursor_pos.restype = wintypes.BOOL
-
 
 @dataclass(frozen=True)
 class CursorPosition:
@@ -47,13 +41,8 @@ class CursorPosition:
 
 
 def read_cursor_position() -> CursorPosition:
-    point = wintypes.POINT()
-    if not _get_cursor_pos(ctypes.byref(point)):
-        raise OSError(
-            ctypes.get_last_error(),
-            "GetCursorPos failed",
-        )
-    return CursorPosition(point.x, point.y)
+    x, y = _cursor_position()
+    return CursorPosition(x, y)
 
 
 def _screen_entry_for_cursor(
@@ -261,7 +250,7 @@ class _ProviderRow(QWidget):
             label,
         )
 
-        track = QRectF(22, top + 4, 190, 4)
+        track = QRectF(22, top + 4, 182, 4)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(colors["track"]))
         painter.drawRoundedRect(track, 2, 2)
@@ -282,7 +271,11 @@ class _ProviderRow(QWidget):
 
         font = _font(9, bold=bold)
         metrics = QFontMetrics(font)
-        available_width = self.width() - 216
+        # Wide enough for the longest real value here — "não conectado"/
+        # "not connected" (59px measured with this font) — with a few
+        # pixels to spare; a narrower column used to elide it down to a
+        # nonsensical "...o conectado".
+        available_width = self.width() - 208
         display_text = metrics.elidedText(
             text,
             Qt.TextElideMode.ElideLeft,
@@ -292,7 +285,7 @@ class _ProviderRow(QWidget):
         painter.setFont(font)
         painter.setPen(QColor(colors["primary"]))
         painter.drawText(
-            QRectF(216, top, available_width, 12),
+            QRectF(208, top, available_width, 12),
             Qt.AlignmentFlag.AlignVCenter
             | Qt.AlignmentFlag.AlignRight,
             display_text,
