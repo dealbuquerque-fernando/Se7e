@@ -25,8 +25,20 @@ _ICON_PATH = config.resource_dir() / "assets" / "se7e_icon_v2.ico"
 # QWidget.setWindowIcon()/QApplication.setWindowIcon() are set to (both
 # were already tried and didn't fix it). Must be set before any window is
 # created, ideally as the very first thing the process does.
+#
+# This exact string must match packaging/installer.iss's MyAppUserModelID:
+# without a Start Menu/Desktop shortcut carrying the same ID, Explorer has
+# no shortcut to resolve the group's real icon from on the first window
+# this process ever shows, and falls back to a provisional/generic icon
+# for about a second before correcting it (diagnosed with Codex's help,
+# 2026-09-21 — see the removed WM_SETICON/hide-show dead ends this
+# replaced in floating_ui_qt.py's git history for what did NOT fix it).
+# No trailing version/date suffix — a stable ID lets Windows Start
+# menu/taskbar pins survive an app upgrade instead of orphaning them.
+APP_USER_MODEL_ID = "Se7eQt.TrayApp"
+
 try:
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Se7eQt.TrayApp.2026092103")
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
 except (AttributeError, OSError):
     pass  # not on Windows, or the call isn't available — cosmetic only
 

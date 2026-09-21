@@ -5,6 +5,12 @@
 #define MyAppName "Se7e"
 #define MyAppVersion "1.0.0"
 #define MyAppExeName "Se7e.exe"
+; Must match the string passed to SetCurrentProcessExplicitAppUserModelID
+; in se7e/app.py exactly — without a shortcut carrying the same
+; AppUserModelID, Explorer can't find a match for the process's group on
+; the first window it ever shows, and falls back to a provisional/generic
+; taskbar icon for about a second before resolving it.
+#define MyAppUserModelID "Se7eQt.TrayApp"
 
 [Setup]
 AppId={{B6A2C6C2-6D6C-4C7C-9B7A-2B7F7C1E7E7E}
@@ -34,8 +40,11 @@ Name: "startupicon"; Description: "Iniciar o Se7e junto com o Windows"; GroupDes
 Source: "..\dist\Se7e\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; \
+  IconFilename: "{app}\{#MyAppExeName}"; AppUserModelID: "{#MyAppUserModelID}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; \
+  IconFilename: "{app}\{#MyAppExeName}"; AppUserModelID: "{#MyAppUserModelID}"; \
+  Tasks: desktopicon
 
 ; Same HKCU Run-key value name and quoted-path format that se7e.autostart
 ; already reads/writes when frozen, so toggling "Iniciar com Windows" in the
