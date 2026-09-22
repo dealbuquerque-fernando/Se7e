@@ -87,6 +87,60 @@ def test_notification_mid_session_does_not_wipe_active_sessions():
         assert result["status"] == "trabalhando"
 
 
+def test_abandoned_session_ages_out_even_while_another_session_stays_active():
+    """A session whose Stop/SessionEnd never fires (terminal killed,
+    laptop slept mid-session) must not stay "trabalhando" forever just
+    because a totally different, legitimately active session keeps
+    refreshing activity — each session needs its own last-active time,
+    not one shared timestamp for the whole entry."""
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "state.json"
+        stuck_since = time.time() - state_store.STALE_SECONDS - 1
+        path.write_text(json.dumps({
+            "claude": {
+                "active_sessions": {"phantom-session": stuck_since, "live-session": time.time()},
+                "status": "trabalhando",
+                "since": time.time(),
+            }
+        }))
+        result = state_store.read_claude_status(path=path)
+        assert result["status"] == "trabalhando"  # live-session is still fresh
+
+        state_store.mark_session_inactive("live-session", path=path)
+        result = state_store.read_claude_status(path=path)
+        assert result["status"] == "parado"  # phantom alone must not keep it stuck
+
+
+def test_legacy_list_shaped_active_sessions_still_ages_out():
+    """Pre-fix state files stored active_sessions as a plain list with no
+    per-session timestamp — migrating that shape must not hand a stale
+    entry a free fresh timestamp just for having the old shape."""
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "state.json"
+        stuck_since = time.time() - state_store.STALE_SECONDS - 1
+        path.write_text(json.dumps({
+            "claude": {
+                "active_sessions": ["old-phantom"],
+                "status": "trabalhando",
+                "since": stuck_since,
+            }
+        }))
+        result = state_store.read_claude_status(path=path)
+        assert result["status"] == "parado"
+
+
+def test_notification_status_not_overridden_while_session_active():
+    """A Notification ("esperando voce") firing while a session is still
+    tracked active must be reported as-is, not forced back to
+    "trabalhando" just because active_sessions is non-empty."""
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "state.json"
+        state_store.mark_session_active("main-session", "trabalhando", path=path)
+        state_store.write_claude_status("esperando voce", path=path)
+        result = state_store.read_claude_status(path=path)
+        assert result["status"] == "esperando voce"
+
+
 if __name__ == "__main__":
     test_roundtrip()
     test_missing_file_returns_default()
@@ -96,4 +150,7 @@ if __name__ == "__main__":
     test_subagent_stopping_does_not_mask_main_session_still_working()
     test_last_session_stopping_reports_idle()
     test_notification_mid_session_does_not_wipe_active_sessions()
+    test_abandoned_session_ages_out_even_while_another_session_stays_active()
+    test_legacy_list_shaped_active_sessions_still_ages_out()
+    test_notification_status_not_overridden_while_session_active()
     print("OK")
