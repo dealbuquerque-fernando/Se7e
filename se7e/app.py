@@ -78,7 +78,8 @@ class App:
         self.codex_usage = {"five_hour": None, "week": None}
         self.codex_status = "parado"
         self.last_usage_poll = 0.0
-        self.last_usage_ok = 0.0
+        self.last_claude_usage_ok = 0.0
+        self.last_codex_usage_ok = 0.0
         self._refresh_settings()
         self.popup = TrayPopup(
             self.toggle_floating, self.toggle_transparent, self.quit, lang=self.lang, theme=self.theme
@@ -219,12 +220,12 @@ class App:
                     new_codex = usage_codex.get_usage()
                     if not new_claude.get("stale"):
                         self.claude_usage = new_claude
+                        self.last_claude_usage_ok = now
                     if not new_codex.get("stale"):
                         self.codex_usage = new_codex
-                    if not new_claude.get("stale") or not new_codex.get("stale"):
-                        self.last_usage_ok = now
+                        self.last_codex_usage_ok = now
                     self.last_usage_poll = now
-                elapsed = int(time.time() - self.last_usage_ok)
+                elapsed = int(time.time() - self._oldest_connected_usage_ok())
                 updated_text = (
                     i18n.t("popup_updated_ago", self.lang, s=elapsed)
                     if elapsed < 120
@@ -236,6 +237,25 @@ class App:
                 pass  # ponytail: never let one bad poll kill the loop
             if self.shutdown_event.wait(STATUS_POLL_SECONDS):
                 return
+
+    def _oldest_connected_usage_ok(self) -> float:
+        """One shared "updated Ns ago" line covers both providers, so it
+        has to reflect whichever CONNECTED one is least fresh — tracking a
+        single combined timestamp (the old design) let either provider's
+        success reset it even while the other sat on stale/rate-limited
+        data, understating how old that data actually was. A provider
+        that's simply not connected shows its own "não conectado" label
+        instead of a percentage, so it doesn't belong in this freshness
+        check."""
+        connected_ok_times = [
+            ok_time
+            for ok_time, usage in (
+                (self.last_claude_usage_ok, self.claude_usage),
+                (self.last_codex_usage_ok, self.codex_usage),
+            )
+            if usage.get("connected", True)
+        ]
+        return min(connected_ok_times) if connected_ok_times else 0.0
 
     def _refresh_ui(self, claude_status: str, updated_text: str) -> None:
         if self._queue_on_gui(lambda: self._refresh_ui(claude_status, updated_text)):
