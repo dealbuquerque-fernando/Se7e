@@ -3,7 +3,7 @@
 ; then compile this with ISCC.exe.
 
 #define MyAppName "Se7e"
-#define MyAppVersion "1.1.1"
+#define MyAppVersion "1.1.2"
 #define MyAppExeName "Se7e.exe"
 ; Must match the string passed to SetCurrentProcessExplicitAppUserModelID
 ; in se7e/app.py exactly — without a shortcut carrying the same
