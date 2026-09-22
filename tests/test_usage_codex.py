@@ -1,9 +1,21 @@
+import base64
+import json
 import sqlite3
 import tempfile
+import time
+import urllib.error
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from se7e import usage_codex
+
+
+def _fake_jwt(payload: dict) -> str:
+    """A JWT with a real header/payload but a nonsense signature — good
+    enough for _decode_id_token_exp, which never checks the signature."""
+    def b64(part: dict) -> str:
+        return base64.urlsafe_b64encode(json.dumps(part).encode()).decode().rstrip("=")
+    return f"{b64({'alg': 'none'})}.{b64(payload)}.sig"
 
 
 def test_parse_usage():
@@ -105,6 +117,170 @@ def test_get_usage_null_tokens_returns_fallback_not_raise():
         assert result == {"connected": True, "five_hour": None, "week": None, "stale": True}
 
 
+def test_decode_id_token_exp_reads_exp_claim():
+    token = _fake_jwt({"exp": 1234567890})
+    assert usage_codex._decode_id_token_exp(token) == 1234567890
+
+
+def test_decode_id_token_exp_malformed_returns_none():
+    assert usage_codex._decode_id_token_exp("not-a-jwt") is None
+    assert usage_codex._decode_id_token_exp("a.b") is None  # missing signature segment is fine, bad payload isn't
+    assert usage_codex._decode_id_token_exp("a.!!!notb64!!!.c") is None
+
+
+def test_read_id_token_expiry_from_file():
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "auth.json"
+        token = _fake_jwt({"exp": 999})
+        path.write_text(json.dumps({"tokens": {"id_token": token}}))
+        assert usage_codex.read_id_token_expiry(path=path) == 999
+
+
+def test_read_id_token_expiry_missing_file_returns_none():
+    with tempfile.TemporaryDirectory() as d:
+        assert usage_codex.read_id_token_expiry(path=Path(d) / "missing.json") is None
+
+
+def test_refresh_via_oauth_updates_tokens_and_preserves_other_fields():
+    """Must not lose auth_mode/OPENAI_API_KEY/account_id — those are the
+    real Codex CLI's own fields, untouched by Se7e's refresh."""
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "auth.json"
+        path.write_text(json.dumps({
+            "auth_mode": "chatgpt",
+            "OPENAI_API_KEY": None,
+            "tokens": {
+                "id_token": "old-id",
+                "access_token": "old-access",
+                "refresh_token": "old-refresh",
+                "account_id": "acc-1",
+            },
+            "last_refresh": "2020-01-01T00:00:00.000000Z",
+        }))
+
+        original_post = usage_codex._post_token_refresh
+        usage_codex._post_token_refresh = lambda refresh_token: {
+            "access_token": "new-access",
+            "refresh_token": "new-refresh",
+            "id_token": "new-id",
+        }
+        try:
+            assert usage_codex._refresh_via_oauth(path=path) is True
+        finally:
+            usage_codex._post_token_refresh = original_post
+
+        data = json.loads(path.read_text())
+        assert data["auth_mode"] == "chatgpt"
+        assert data["tokens"]["access_token"] == "new-access"
+        assert data["tokens"]["refresh_token"] == "new-refresh"
+        assert data["tokens"]["id_token"] == "new-id"
+        assert data["tokens"]["account_id"] == "acc-1"  # untouched
+        assert data["last_refresh"] != "2020-01-01T00:00:00.000000Z"
+
+
+def test_refresh_via_oauth_network_failure_leaves_file_untouched():
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "auth.json"
+        original_content = json.dumps({"tokens": {"refresh_token": "rt", "access_token": "old"}})
+        path.write_text(original_content)
+
+        original_post = usage_codex._post_token_refresh
+        usage_codex._post_token_refresh = lambda refresh_token: None
+        try:
+            assert usage_codex._refresh_via_oauth(path=path) is False
+        finally:
+            usage_codex._post_token_refresh = original_post
+
+        assert path.read_text() == original_content
+
+
+def test_refresh_via_oauth_missing_refresh_token_returns_false():
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "auth.json"
+        path.write_text(json.dumps({"tokens": {"access_token": "old"}}))
+        assert usage_codex._refresh_via_oauth(path=path) is False
+
+
+def test_get_usage_refreshes_proactively_when_near_expiry():
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "auth.json"
+        near_expiry = int(time.time()) + 10  # inside REFRESH_MARGIN_SECONDS
+        path.write_text(json.dumps({
+            "tokens": {
+                "access_token": "stale-access",
+                "refresh_token": "rt",
+                "account_id": "acc-1",
+                "id_token": _fake_jwt({"exp": near_expiry}),
+            },
+        }))
+
+        original_auth_path = usage_codex.AUTH_PATH
+        original_fetch = usage_codex.fetch_usage
+        original_post = usage_codex._post_token_refresh
+        usage_codex.AUTH_PATH = path
+        seen_tokens = []
+
+        def fake_post(refresh_token):
+            return {"access_token": "fresh-access", "id_token": _fake_jwt({"exp": int(time.time()) + 3600})}
+
+        def fake_fetch(credential):
+            seen_tokens.append(credential["access_token"])
+            return {"five_hour": 5, "week": 10}
+
+        usage_codex._post_token_refresh = fake_post
+        usage_codex.fetch_usage = fake_fetch
+        try:
+            result = usage_codex.get_usage()
+        finally:
+            usage_codex.AUTH_PATH = original_auth_path
+            usage_codex.fetch_usage = original_fetch
+            usage_codex._post_token_refresh = original_post
+
+        assert result == {"five_hour": 5, "week": 10, "connected": True, "stale": False}
+        assert seen_tokens == ["fresh-access"]  # used the refreshed token, not the stale one
+
+
+def test_get_usage_refreshes_reactively_on_401():
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "auth.json"
+        far_expiry = int(time.time()) + 3600
+        path.write_text(json.dumps({
+            "tokens": {
+                "access_token": "expired-access",
+                "refresh_token": "rt",
+                "account_id": "acc-1",
+                "id_token": _fake_jwt({"exp": far_expiry}),
+            },
+        }))
+
+        original_auth_path = usage_codex.AUTH_PATH
+        original_fetch = usage_codex.fetch_usage
+        original_post = usage_codex._post_token_refresh
+        usage_codex.AUTH_PATH = path
+        calls = []
+
+        def fake_post(refresh_token):
+            return {"access_token": "fresh-access"}
+
+        def fake_fetch(credential):
+            calls.append(credential["access_token"])
+            if credential["access_token"] == "expired-access":
+                raise urllib.error.HTTPError("http://x", 401, "unauthorized", {}, None)
+            return {"five_hour": 1, "week": 2}
+
+        usage_codex._post_token_refresh = fake_post
+        usage_codex.fetch_usage = fake_fetch
+        try:
+            result = usage_codex.get_usage()
+        finally:
+            usage_codex.AUTH_PATH = original_auth_path
+            usage_codex.fetch_usage = original_fetch
+            usage_codex._post_token_refresh = original_post
+
+        assert result == {"five_hour": 1, "week": 2, "connected": True, "stale": False}
+        assert calls == ["expired-access", "fresh-access"]  # retried after refreshing
+
+
 if __name__ == "__main__":
     test_parse_usage()
     test_parse_usage_from_real_api_shape_nested_under_rate_limit()
@@ -116,5 +292,14 @@ if __name__ == "__main__":
     test_is_busy_false_when_no_active_turn()
     test_is_busy_missing_db_returns_false()
     test_get_usage_malformed_tokens_shape_returns_fallback_not_raise()
+    test_decode_id_token_exp_reads_exp_claim()
+    test_decode_id_token_exp_malformed_returns_none()
+    test_read_id_token_expiry_from_file()
+    test_read_id_token_expiry_missing_file_returns_none()
+    test_refresh_via_oauth_updates_tokens_and_preserves_other_fields()
+    test_refresh_via_oauth_network_failure_leaves_file_untouched()
+    test_refresh_via_oauth_missing_refresh_token_returns_false()
+    test_get_usage_refreshes_proactively_when_near_expiry()
+    test_get_usage_refreshes_reactively_on_401()
     test_get_usage_null_tokens_returns_fallback_not_raise()
     print("OK")
