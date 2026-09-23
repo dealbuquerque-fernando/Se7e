@@ -137,3 +137,10 @@ def _set_joins_all_spaces(widget: QWidget) -> None:
         )
     except Exception:
         pass
+
+
+def _hide_from_taskbar(widget: QWidget) -> None:
+    """No-op on macOS: LSUIElement in Info.plist (packaging/se7e.spec)
+    already keeps the whole process out of the Dock and Cmd+Tab switcher,
+    for every window it ever shows — there's no per-window taskbar concept
+    here the way Windows has one."""

@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 
 from . import autostart, i18n, settings_store, ui_colors
 from .config import resource_dir
-from .floating_ui_qt import _font, _reapply_icon_after_show, _window_icon
+from .floating_ui_qt import _font, _hide_from_taskbar, _reapply_icon_after_show, _window_icon
 
 
 WINDOW_WIDTH = 460
@@ -495,6 +495,7 @@ class SettingsWindow:
         if self.window is None:
             self.window = _SettingsDialog(self)
             self.window.finished.connect(self._on_closed)
+            _hide_from_taskbar(self.window)
             self.window.show()
             _reapply_icon_after_show(self.window)
             self.window.raise_()

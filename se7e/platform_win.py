@@ -17,6 +17,11 @@ _HWND_TOPMOST = -1
 _SWP_NOMOVE = 0x0002
 _SWP_NOSIZE = 0x0001
 _SWP_NOACTIVATE = 0x0010
+_SWP_FRAMECHANGED = 0x0020
+
+_GWL_EXSTYLE = -20
+_WS_EX_TOOLWINDOW = 0x00000080
+_WS_EX_APPWINDOW = 0x00040000
 
 _user32 = ctypes.WinDLL("user32", use_last_error=True)
 
@@ -39,6 +44,17 @@ _set_window_pos.restype = wintypes.BOOL
 _get_cursor_pos = _user32.GetCursorPos
 _get_cursor_pos.argtypes = [ctypes.POINTER(wintypes.POINT)]
 _get_cursor_pos.restype = wintypes.BOOL
+
+# GWL_EXSTYLE is a 32-bit style bitmask on both 32- and 64-bit Windows (only
+# pointer-sized values like GWLP_USERDATA need the *Ptr variants), so the
+# plain W functions are correct here, not GetWindowLongPtrW/SetWindowLongPtrW.
+_get_window_long = _user32.GetWindowLongW
+_get_window_long.argtypes = [wintypes.HWND, ctypes.c_int]
+_get_window_long.restype = wintypes.LONG
+
+_set_window_long = _user32.SetWindowLongW
+_set_window_long.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.LONG]
+_set_window_long.restype = wintypes.LONG
 
 
 class _MonitorInfo(ctypes.Structure):
@@ -142,3 +158,27 @@ def _set_joins_all_spaces(widget: QWidget) -> None:
     """No-op on Windows: WS_EX_TOPMOST (already applied via
     SetWindowPos above) already keeps a window above a full-screen app
     without needing anything like macOS's per-Space window behavior."""
+
+
+def _hide_from_taskbar(widget: QWidget) -> None:
+    """Excludes this window (the popup, the floating pill, or the settings
+    dialog) from its own taskbar button — they're auxiliary windows for a
+    tray-only app, not separate tasks. Call this BEFORE the widget's first
+    show(): winId() forces the native HWND to exist without making it
+    visible, so the style is already correct by the time show() actually
+    displays it, instead of a taskbar button flashing in and out."""
+    try:
+        hwnd = int(widget.winId())
+        style = _get_window_long(hwnd, _GWL_EXSTYLE)
+        _set_window_long(hwnd, _GWL_EXSTYLE, (style | _WS_EX_TOOLWINDOW) & ~_WS_EX_APPWINDOW)
+        _set_window_pos(
+            hwnd,
+            None,
+            0,
+            0,
+            0,
+            0,
+            _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE | _SWP_FRAMECHANGED,
+        )
+    except OSError:
+        pass

@@ -29,6 +29,7 @@ if sys.platform == "darwin":
     from .platform_mac import (
         _cursor_position,
         _force_topmost,
+        _hide_from_taskbar,
         _set_joins_all_spaces,
         _set_native_geometry,
         monitor_rect_for_point,
@@ -39,6 +40,7 @@ elif sys.platform == "win32":
     from .platform_win import (
         _cursor_position,
         _force_topmost,
+        _hide_from_taskbar,
         _set_joins_all_spaces,
         _set_native_geometry,
         monitor_rect_for_point,
@@ -396,6 +398,7 @@ class FloatingWidget(QWidget):
         # handle. Observed live: whichever window opens first "wins" the
         # group's icon for the rest of the session.
         self.setWindowIcon(_window_icon())
+        _hide_from_taskbar(self)
         self.show()
         _reapply_icon_after_show(self)
         _force_topmost(self)

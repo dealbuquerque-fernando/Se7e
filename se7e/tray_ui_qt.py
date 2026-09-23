@@ -18,6 +18,7 @@ from .floating_ui_qt import (
     _dpi_scale,
     _font,
     _force_topmost,
+    _hide_from_taskbar,
     _native_window_size,
     _reapply_icon_after_show,
     _screen_geometry,
@@ -770,6 +771,7 @@ class TrayPopup:
         self.window = _TrayPanel(self)
         self._ensure_blink_timer()
         self._resize_and_reposition(WINDOW_HEIGHT)
+        _hide_from_taskbar(self.window)
         self.window.show()
         _reapply_icon_after_show(self.window)
         self.window.raise_()
