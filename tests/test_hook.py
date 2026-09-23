@@ -75,6 +75,67 @@ def test_notification_informational_types_are_ignored():
         assert _run_notification(notification_type) == [], f"{notification_type} should not mark any session active"
 
 
+def _run_subagent_event(event, session_id="sess-1", agent_id=None):
+    """Runs hook.main(event) with a fake SubagentStart/SubagentStop
+    payload, capturing what it would pass to
+    mark_session_active/mark_session_inactive — same mocking approach as
+    _run_notification() above, for the same reason (path defaults are
+    bound at state_store.py's import time)."""
+    active_calls = []
+    inactive_calls = []
+    original_read = hook._read_stdin_payload
+    original_mark_active = state_store.mark_session_active
+    original_mark_inactive = state_store.mark_session_inactive
+    original_log = hook._log
+    payload = {"session_id": session_id}
+    if agent_id is not None:
+        payload["agent_id"] = agent_id
+    hook._read_stdin_payload = lambda: payload
+    state_store.mark_session_active = lambda sid, status, path=None: active_calls.append((sid, status))
+    state_store.mark_session_inactive = lambda sid, path=None: inactive_calls.append(sid)
+    hook._log = lambda *a, **k: None
+    try:
+        hook.main(event)
+    finally:
+        hook._read_stdin_payload = original_read
+        state_store.mark_session_active = original_mark_active
+        state_store.mark_session_inactive = original_mark_inactive
+        hook._log = original_log
+    return active_calls, inactive_calls
+
+
+def test_subagent_start_keys_on_agent_id_when_present():
+    active, _ = _run_subagent_event("SubagentStart", session_id="sess-1", agent_id="agent-abc")
+    assert active == [("sess-1:agent-abc", "trabalhando")]
+
+
+def test_subagent_stop_keys_on_agent_id_when_present():
+    _, inactive = _run_subagent_event("SubagentStop", session_id="sess-1", agent_id="agent-abc")
+    assert inactive == ["sess-1:agent-abc"]
+
+
+def test_two_concurrent_subagents_get_independent_keys():
+    """The bug this exists to fix: confirmed live, a single subagent
+    dispatch produced multiple SubagentStop firings sharing session_id —
+    without agent_id in the key, the first one to stop would clear the
+    shared entry while a second, still-running subagent's own work was
+    mistaken for finished. Two different agent_ids under the same
+    session_id must produce two independent keys."""
+    active_a, _ = _run_subagent_event("SubagentStart", session_id="sess-1", agent_id="agent-a")
+    active_b, _ = _run_subagent_event("SubagentStart", session_id="sess-1", agent_id="agent-b")
+    _, inactive_a = _run_subagent_event("SubagentStop", session_id="sess-1", agent_id="agent-a")
+    assert active_a == [("sess-1:agent-a", "trabalhando")]
+    assert active_b == [("sess-1:agent-b", "trabalhando")]
+    assert inactive_a == ["sess-1:agent-a"]  # agent-b's own key is untouched
+
+
+def test_subagent_events_fall_back_to_flat_suffix_without_agent_id():
+    """Degrades to the pre-agent_id behavior if a payload ever lacks it
+    (should not happen per Anthropic's docs, but must not crash)."""
+    active, _ = _run_subagent_event("SubagentStart", session_id="sess-1", agent_id=None)
+    assert active == [("sess-1:subagent", "trabalhando")]
+
+
 def test_tool_use_events_are_ignored():
     assert hook.status_for_event("PreToolUse") is None
     assert hook.status_for_event("PostToolUse") is None
@@ -128,6 +189,10 @@ if __name__ == "__main__":
     test_notification_elicitation_url_dialog_sets_esperando_decisao()
     test_notification_idle_prompt_sets_esperando_voce()
     test_notification_informational_types_are_ignored()
+    test_subagent_start_keys_on_agent_id_when_present()
+    test_subagent_stop_keys_on_agent_id_when_present()
+    test_two_concurrent_subagents_get_independent_keys()
+    test_subagent_events_fall_back_to_flat_suffix_without_agent_id()
     test_tool_use_events_are_ignored()
     test_hook_invoked_as_bare_script_exits_zero_and_writes_status()
     print("OK")

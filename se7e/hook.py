@@ -130,16 +130,22 @@ def main(event: str | None = None) -> None:
             payload = _read_stdin_payload()
             session_key = payload.get("session_id") or "unknown"
             if event in ("SubagentStart", "SubagentStop"):
-                # It's unconfirmed whether Claude Code's subagent hook
-                # payload reuses the parent's own session_id or gives each
-                # subagent a distinct one — a shared ":subagent" suffix
-                # guarantees a subagent's Stop can never remove the plain
-                # parent session_id entry either way.
-                # ponytail: two subagents running in parallel under the
-                # same session both map to this one key, so the first to
-                # finish clears it early — upgrade to a per-dispatch id if
-                # Claude Code's payload exposes one and this matters live.
-                session_key = f"{session_key}:subagent"
+                # agent_id is a required field on SubagentStart/SubagentStop
+                # (code.claude.com/docs/en/hooks) — a unique id per subagent
+                # dispatch, unlike session_id, which every subagent in the
+                # same session shares. Confirmed live: a single subagent
+                # dispatch produced one SubagentStart but THREE
+                # SubagentStop firings sharing the old flat ":subagent"
+                # key — the first one incorrectly cleared the tracked
+                # session while the real subagent was still running,
+                # showing "parado" (gray) mid-task. Keying on agent_id
+                # instead isolates each dispatch, so one clearing early
+                # can't affect another. Falls back to the old flat suffix
+                # only if agent_id is ever missing (should not happen per
+                # the docs, but degrading to the previous behavior beats
+                # crashing on an unexpected payload shape).
+                agent_id = payload.get("agent_id")
+                session_key = f"{session_key}:{agent_id}" if agent_id else f"{session_key}:subagent"
             if event in _ACTIVE_EVENTS:
                 state_store.mark_session_active(session_key, status)
             else:
