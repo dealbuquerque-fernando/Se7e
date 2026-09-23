@@ -44,6 +44,16 @@ def test_tray_icon_color_is_neutral_and_provider_agnostic():
     assert ui_colors.tray_icon_color("parado", "parado") == "#4b5160"
 
 
+def test_tray_icon_should_blink_only_while_working_or_needs_a_decision():
+    assert ui_colors.tray_icon_should_blink("trabalhando", "parado") is True
+    assert ui_colors.tray_icon_should_blink("parado", "esperando decisao") is True
+    # Idle alone ("esperando voce") already turns the badge white via
+    # tray_icon_color(), but shouldn't make it blink — only a genuinely
+    # active/urgent status should.
+    assert ui_colors.tray_icon_should_blink("esperando voce", "parado") is False
+    assert ui_colors.tray_icon_should_blink("parado", "parado") is False
+
+
 def test_format_pct():
     assert ui_colors.format_pct(42) == "42%"
     assert ui_colors.format_pct(42.6) == "43%"
@@ -63,6 +73,7 @@ if __name__ == "__main__":
     test_should_blink_only_when_working_or_needs_a_decision()
     test_disconnected_overrides_status_color_and_blink()
     test_tray_icon_color_is_neutral_and_provider_agnostic()
+    test_tray_icon_should_blink_only_while_working_or_needs_a_decision()
     test_format_pct()
     test_format_pct_respects_language()
     print("OK")

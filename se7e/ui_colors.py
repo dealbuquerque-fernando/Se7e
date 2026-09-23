@@ -37,6 +37,14 @@ def tray_icon_color(claude_status: str, codex_status: str) -> str:
     return STATUS_COLORS["parado"]
 
 
+def tray_icon_should_blink(claude_status: str, codex_status: str) -> bool:
+    """The tray badge blinks exactly when either provider's own dot would
+    also be blinking (actively working, or needing a decision) — a solid
+    badge already means "something's active", so it stays static rather
+    than blinking while merely idle ("esperando voce")."""
+    return should_blink(claude_status) or should_blink(codex_status)
+
+
 def should_blink(status: str, connected: bool = True) -> bool:
     return connected and status in ("trabalhando", "esperando decisao")
 

@@ -111,6 +111,33 @@ def test_get_status_finished_a_while_ago_reads_as_esperando_voce():
         assert usage_codex.get_status(db_path) == "esperando voce"
 
 
+def test_get_status_more_than_24h_since_last_turn_reverts_to_parado():
+    """Mirrors state_store.STALE_SECONDS: a Codex thread used once and
+    never touched again must eventually stop showing "esperando voce"
+    forever, the same way Claude's own idle sessions get pruned."""
+    with tempfile.TemporaryDirectory() as d:
+        db_path = Path(d) / "thread_history_1.sqlite"
+        conn = sqlite3.connect(db_path)
+        conn.execute("CREATE TABLE thread_turns (status TEXT, completed_at INTEGER)")
+        old = int(time.time()) - usage_codex.state_store.STALE_SECONDS - 1
+        conn.execute("INSERT INTO thread_turns (status, completed_at) VALUES ('done', ?)", (old,))
+        conn.commit()
+        conn.close()
+        assert usage_codex.get_status(db_path) == "parado"
+
+
+def test_get_status_just_under_24h_still_reads_as_esperando_voce():
+    with tempfile.TemporaryDirectory() as d:
+        db_path = Path(d) / "thread_history_1.sqlite"
+        conn = sqlite3.connect(db_path)
+        conn.execute("CREATE TABLE thread_turns (status TEXT, completed_at INTEGER)")
+        old = int(time.time()) - usage_codex.state_store.STALE_SECONDS + 60
+        conn.execute("INSERT INTO thread_turns (status, completed_at) VALUES ('done', ?)", (old,))
+        conn.commit()
+        conn.close()
+        assert usage_codex.get_status(db_path) == "esperando voce"
+
+
 def test_get_status_never_used_reads_as_parado():
     with tempfile.TemporaryDirectory() as d:
         db_path = Path(d) / "thread_history_1.sqlite"
@@ -350,6 +377,8 @@ if __name__ == "__main__":
     test_is_busy_false_when_no_active_turn()
     test_get_status_just_finished_reads_as_parado()
     test_get_status_finished_a_while_ago_reads_as_esperando_voce()
+    test_get_status_more_than_24h_since_last_turn_reverts_to_parado()
+    test_get_status_just_under_24h_still_reads_as_esperando_voce()
     test_get_status_never_used_reads_as_parado()
     test_get_status_missing_db_reads_as_parado()
     test_get_status_busy_wins_over_a_recently_completed_turn()

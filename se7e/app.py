@@ -17,6 +17,11 @@ from .tray_ui_qt import TrayPopup, make_icon_image
 
 USAGE_POLL_SECONDS = 45
 STATUS_POLL_SECONDS = 2
+# Same 300ms rate as the popup/floating dots' own blink timer
+# (tray_ui_qt.py's TrayPopup._ensure_blink_timer) — a separate loop from
+# STATUS_POLL_SECONDS so the blink stays smooth without polling
+# claude_status/codex_status themselves any more often than before.
+TRAY_BLINK_INTERVAL_SECONDS = 0.3
 _ICON_PATH = config.resource_dir() / "assets" / "se7e_icon_v2.ico"
 
 # Without a distinct AppUserModelID, Windows groups this taskbar entry under
@@ -76,7 +81,9 @@ class App:
         self.transparent = False
         self.claude_usage = {"five_hour": None, "week": None}
         self.codex_usage = {"five_hour": None, "week": None}
+        self.claude_status = "parado"
         self.codex_status = "parado"
+        self._tray_blink_on = True
         self.last_usage_poll = 0.0
         self.last_claude_usage_ok = 0.0
         self.last_codex_usage_ok = 0.0
@@ -212,7 +219,7 @@ class App:
     def poll_loop(self) -> None:
         while not self.shutdown_event.is_set():
             try:
-                claude_status = state_store.read_claude_status()["status"]
+                self.claude_status = state_store.read_claude_status()["status"]
                 self.codex_status = usage_codex.get_status()
                 now = time.time()
                 if now - self.last_usage_poll > USAGE_POLL_SECONDS:
@@ -231,11 +238,36 @@ class App:
                     if elapsed < 120
                     else i18n.t("popup_updated_stale", self.lang)
                 )
-                self._refresh_ui(claude_status, updated_text)
-                self.icon.icon = make_icon_image(ui_colors.tray_icon_color(claude_status, self.codex_status))
+                self._refresh_ui(self.claude_status, updated_text)
             except Exception:
                 pass  # ponytail: never let one bad poll kill the loop
             if self.shutdown_event.wait(STATUS_POLL_SECONDS):
+                return
+
+    def _tray_icon_color(self) -> str:
+        """The active color, held solid while only "esperando voce" (idle)
+        is in play, or flipped every other tick to the idle/gray color
+        while genuinely blink-worthy (working or needing a decision) — see
+        ui_colors.tray_icon_should_blink()."""
+        active_color = ui_colors.tray_icon_color(self.claude_status, self.codex_status)
+        if not ui_colors.tray_icon_should_blink(self.claude_status, self.codex_status):
+            self._tray_blink_on = True
+            return active_color
+        color = active_color if self._tray_blink_on else ui_colors.STATUS_COLORS["parado"]
+        self._tray_blink_on = not self._tray_blink_on
+        return color
+
+    def _tray_blink_loop(self) -> None:
+        """Runs on its own faster cadence than poll_loop's status reads
+        (see TRAY_BLINK_INTERVAL_SECONDS) so the tray badge's blink looks
+        as smooth as the popup/floating dots' own blink, without polling
+        claude_status/codex_status themselves any more often than before."""
+        while not self.shutdown_event.is_set():
+            try:
+                self.icon.icon = make_icon_image(self._tray_icon_color())
+            except Exception:
+                pass  # ponytail: never let one bad tick kill the loop
+            if self.shutdown_event.wait(TRAY_BLINK_INTERVAL_SECONDS):
                 return
 
     def _oldest_connected_usage_ok(self) -> float:
@@ -280,6 +312,11 @@ class App:
         threading.Thread(
             target=self.poll_loop,
             name="se7e-poll",
+            daemon=True,
+        ).start()
+        threading.Thread(
+            target=self._tray_blink_loop,
+            name="se7e-tray-blink",
             daemon=True,
         ).start()
         # macOS's AppKit (which draws the menu-bar status item) only

@@ -95,6 +95,36 @@ def test_oldest_connected_usage_ok_both_disconnected_returns_zero():
     assert instance._oldest_connected_usage_ok() == 0.0
 
 
+def test_tray_icon_color_blinks_while_working():
+    """Blink-worthy statuses ("trabalhando"/"esperando decisao") must
+    alternate between the active color and the idle/gray color from one
+    tick to the next, not stay solid."""
+    instance = _bare_app()
+    instance.claude_status = "trabalhando"
+    instance.codex_status = "parado"
+    instance._tray_blink_on = True
+    first = instance._tray_icon_color()
+    second = instance._tray_icon_color()
+    third = instance._tray_icon_color()
+    assert first == app_module.ui_colors.tray_icon_color("trabalhando", "parado")
+    assert second == app_module.ui_colors.STATUS_COLORS["parado"]
+    assert third == first
+
+
+def test_tray_icon_color_stays_solid_while_only_idle():
+    """"esperando voce" alone (no working/decision status on either
+    provider) must never blink — the badge stays a static active color."""
+    instance = _bare_app()
+    instance.claude_status = "esperando voce"
+    instance.codex_status = "parado"
+    instance._tray_blink_on = True
+    first = instance._tray_icon_color()
+    second = instance._tray_icon_color()
+    expected = app_module.ui_colors.tray_icon_color("esperando voce", "parado")
+    assert first == expected
+    assert second == expected
+
+
 def test_oldest_connected_usage_ok_missing_connected_key_defaults_true():
     """Before the very first successful poll, claude_usage/codex_usage are
     still their __init__ placeholders with no "connected" key at all —
@@ -114,4 +144,6 @@ if __name__ == "__main__":
     test_oldest_connected_usage_ok_ignores_a_disconnected_provider()
     test_oldest_connected_usage_ok_both_disconnected_returns_zero()
     test_oldest_connected_usage_ok_missing_connected_key_defaults_true()
+    test_tray_icon_color_blinks_while_working()
+    test_tray_icon_color_stays_solid_while_only_idle()
     print("OK")

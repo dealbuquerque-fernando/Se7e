@@ -9,6 +9,8 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import state_store
+
 ENDPOINT = "https://chatgpt.com/backend-api/wham/usage"
 # Public: openai/codex's own codex-rs/core/src/auth.rs, and documented at
 # developers.openai.com/codex/auth/ci-cd-auth. A plain OAuth token-endpoint
@@ -227,6 +229,12 @@ def get_status(db_path: Path = THREAD_DB_PATH) -> str:
     last_completed = _last_completed_turn_at(db_path)
     if last_completed is None:
         return "parado"  # never used Codex, or the db doesn't exist yet
-    if time.time() - last_completed < IDLE_GRACE_SECONDS:
+    elapsed = time.time() - last_completed
+    if elapsed < IDLE_GRACE_SECONDS:
         return "parado"  # just finished — same brief window Claude has right after its own Stop
+    # Same upper bound as Claude's own session pruning (state_store.STALE_SECONDS):
+    # without it, a Codex thread used once and never again would show white forever,
+    # unlike Claude's equivalent state, which eventually reverts to "parado".
+    if elapsed >= state_store.STALE_SECONDS:
+        return "parado"
     return "esperando voce"
