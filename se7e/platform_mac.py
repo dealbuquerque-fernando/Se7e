@@ -57,17 +57,6 @@ def monitor_rect_for_point(x: int, y: int) -> WindowRect:
     return _physical_screen_rect(_screen_for_point(x, y))
 
 
-def taskbar_thickness_for_point(x: int, y: int) -> int:
-    """Dock/menu-bar thickness in physical pixels."""
-    screen = _screen_for_point(x, y)
-    full = _physical_screen_rect(screen)
-    work = _physical_available_rect(screen)
-
-    height_diff = (full.bottom - full.top) - (work.bottom - work.top)
-    width_diff = (full.right - full.left) - (work.right - work.left)
-    return max(height_diff, width_diff)
-
-
 def read_window_rect(widget: QWidget) -> WindowRect:
     screen = widget.screen() or QGuiApplication.primaryScreen()
     return _physical_rect(widget.geometry(), float(screen.devicePixelRatio()))

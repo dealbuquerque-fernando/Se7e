@@ -33,7 +33,6 @@ if sys.platform == "darwin":
         _set_native_geometry,
         monitor_rect_for_point,
         read_window_rect,
-        taskbar_thickness_for_point,
         work_area_for_point,
     )
 elif sys.platform == "win32":
@@ -44,7 +43,6 @@ elif sys.platform == "win32":
         _set_native_geometry,
         monitor_rect_for_point,
         read_window_rect,
-        taskbar_thickness_for_point,
         work_area_for_point,
     )
 else:
@@ -73,7 +71,16 @@ def _reapply_icon_after_show(window: QWidget) -> None:
 
 
 WINDOW_WIDTH = 150
-WINDOW_HEIGHT = 100
+# The pill's cross-dimension (height when docked horizontally, width when
+# vertical) used to be measured from the OS's own taskbar/Dock thickness,
+# so the pill would sit flush against it — but that made the exact same
+# design look very different across platforms, and even across Dock
+# settings on the same Mac (a Dock set to auto-hide reserves no space at
+# all, silently falling back to measuring the menu bar instead: 25 logical
+# px, vs. Windows' usual ~40+ for its taskbar). Now a fixed constant, so
+# both platforms render identically regardless of the OS's own taskbar/Dock
+# configuration.
+PILL_THICKNESS = 25
 RIGHT_MARGIN = 20
 BOTTOM_MARGIN = 60
 CORNER_RADIUS = 14
@@ -145,43 +152,18 @@ def _screen_geometry(screen) -> ScreenGeometry:
     )
 
 
-def _taskbar_thickness(
-    screen: ScreenGeometry,
-) -> tuple[int, int]:
-    phys_x, phys_y, phys_width, phys_height = _physical_screen_bounds(screen)
-    query_x = int(phys_x + phys_width - 10)
-    query_y = int(phys_y + phys_height - 10)
-
-    try:
-        physical = taskbar_thickness_for_point(query_x, query_y)
-    except OSError:
-        physical = 0
-
-    if physical <= 0:
-        fallback = _native_window_size(
-            WINDOW_WIDTH,
-            WINDOW_HEIGHT,
-            screen,
-        )[1]
-        return WINDOW_HEIGHT, fallback
-
-    _, height_scale = _dpi_scale(screen)
-    logical = max(1, round(physical / height_scale))
-    return logical, physical
-
-
 def _floating_dimensions(
     screen: ScreenGeometry,
     orientation: str,
 ) -> tuple[int, int, int, int]:
     """Return logical width/height and physical width/height."""
-    logical_thickness, physical_thickness = _taskbar_thickness(screen)
     width_scale, height_scale = _dpi_scale(screen)
+    physical_thickness = round(PILL_THICKNESS * height_scale)
 
     if orientation == "vertical":
         physical_length = round(WINDOW_WIDTH * height_scale)
         return (
-            logical_thickness,
+            PILL_THICKNESS,
             WINDOW_WIDTH,
             physical_thickness,
             physical_length,
@@ -190,7 +172,7 @@ def _floating_dimensions(
     physical_length = round(WINDOW_WIDTH * width_scale)
     return (
         WINDOW_WIDTH,
-        logical_thickness,
+        PILL_THICKNESS,
         physical_length,
         physical_thickness,
     )

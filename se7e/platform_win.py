@@ -83,23 +83,6 @@ def monitor_rect_for_point(x: int, y: int) -> WindowRect:
     return WindowRect(rect.left, rect.top, rect.right, rect.bottom)
 
 
-def taskbar_thickness_for_point(x: int, y: int) -> int:
-    """Taskbar thickness in physical pixels."""
-    info = _monitor_info_for_point(x, y)
-    monitor = info.rcMonitor
-    work = info.rcWork
-
-    height_diff = (
-        (monitor.bottom - monitor.top)
-        - (work.bottom - work.top)
-    )
-    width_diff = (
-        (monitor.right - monitor.left)
-        - (work.right - work.left)
-    )
-    return max(height_diff, width_diff)
-
-
 def read_window_rect(widget: QWidget) -> WindowRect:
     rect = wintypes.RECT()
     hwnd = int(widget.winId())
