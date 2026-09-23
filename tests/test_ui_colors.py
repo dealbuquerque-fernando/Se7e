@@ -6,7 +6,13 @@ from se7e import ui_colors
 
 def test_color_for_status_claude_default():
     assert ui_colors.color_for_status("trabalhando") == "#22c55e"
-    assert ui_colors.color_for_status("esperando voce") == "#eab308"
+    # idle_prompt (just finished, waiting for your next message) shares
+    # the tray badge's own neutral white — not urgent.
+    assert ui_colors.color_for_status("esperando voce") == "#ffffff"
+    # A real decision needed from you (permission_prompt/agent_needs_input/
+    # elicitation_*) keeps the old amber, now the more urgent of the two
+    # waiting colors.
+    assert ui_colors.color_for_status("esperando decisao") == "#eab308"
     assert ui_colors.color_for_status("parado") == "#4b5160"
 
 
@@ -15,8 +21,9 @@ def test_color_for_status_custom_working_color():
     assert ui_colors.color_for_status("parado", working_color=ui_colors.CODEX_WORKING_COLOR) == "#4b5160"
 
 
-def test_should_blink_only_when_working():
+def test_should_blink_only_when_working_or_needs_a_decision():
     assert ui_colors.should_blink("trabalhando") is True
+    assert ui_colors.should_blink("esperando decisao") is True
     assert ui_colors.should_blink("esperando voce") is False
     assert ui_colors.should_blink("parado") is False
 
@@ -53,7 +60,7 @@ def test_format_pct_respects_language():
 if __name__ == "__main__":
     test_color_for_status_claude_default()
     test_color_for_status_custom_working_color()
-    test_should_blink_only_when_working()
+    test_should_blink_only_when_working_or_needs_a_decision()
     test_disconnected_overrides_status_color_and_blink()
     test_tray_icon_color_is_neutral_and_provider_agnostic()
     test_format_pct()

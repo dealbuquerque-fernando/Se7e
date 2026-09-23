@@ -72,11 +72,11 @@ def test_last_session_stopping_reports_idle():
 
 
 def test_notification_mid_session_does_not_wipe_active_sessions():
-    """write_claude_status (the Notification event's own path — the one
-    event not covered by mark_session_active/inactive) must not clobber
-    active_sessions, or a subagent's Stop right after a Notification finds
-    no record of the still-running main session and wrongly reports
-    "parado"."""
+    """write_claude_status (a manual/direct-use path — real Notification
+    events go through mark_session_active now, see hook.py) must still
+    not clobber active_sessions if ever called mid-session, or a
+    subagent's Stop right after would find no record of the still-running
+    main session and wrongly report "parado"."""
     with tempfile.TemporaryDirectory() as d:
         path = Path(d) / "state.json"
         state_store.mark_session_active("main-session", "trabalhando", path=path)
@@ -129,16 +129,40 @@ def test_legacy_list_shaped_active_sessions_still_ages_out():
         assert result["status"] == "parado"
 
 
-def test_notification_status_not_overridden_while_session_active():
-    """A Notification ("esperando voce") firing while a session is still
-    tracked active must be reported as-is, not forced back to
-    "trabalhando" just because active_sessions is non-empty."""
+def test_session_transitioning_from_trabalhando_to_esperando_voce_updates_status():
+    """A session that finishes a turn and gets an idle_prompt Notification
+    updates its OWN tracked status via mark_session_active — replacing
+    "trabalhando" with "esperando voce" for that same session_id, not
+    leaving the old status stuck."""
     with tempfile.TemporaryDirectory() as d:
         path = Path(d) / "state.json"
         state_store.mark_session_active("main-session", "trabalhando", path=path)
-        state_store.write_claude_status("esperando voce", path=path)
+        state_store.mark_session_active("main-session", "esperando voce", path=path)
         result = state_store.read_claude_status(path=path)
         assert result["status"] == "esperando voce"
+
+
+def test_multiple_sessions_different_statuses_prioritizes_trabalhando():
+    """Session A working + Session B just idle-waiting on you -> the dot
+    shows "trabalhando" (green), the more actionable of the two — one
+    session's idle Notification must not mask another's real activity."""
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "state.json"
+        state_store.mark_session_active("session-a", "trabalhando", path=path)
+        state_store.mark_session_active("session-b", "esperando voce", path=path)
+        result = state_store.read_claude_status(path=path)
+        assert result["status"] == "trabalhando"
+
+
+def test_multiple_sessions_prioritizes_esperando_decisao_over_esperando_voce():
+    """Session A just idle-waiting + Session B needs an actual decision ->
+    the dot shows "esperando decisao" (more urgent than plain idle)."""
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "state.json"
+        state_store.mark_session_active("session-a", "esperando voce", path=path)
+        state_store.mark_session_active("session-b", "esperando decisao", path=path)
+        result = state_store.read_claude_status(path=path)
+        assert result["status"] == "esperando decisao"
 
 
 if __name__ == "__main__":
@@ -152,5 +176,7 @@ if __name__ == "__main__":
     test_notification_mid_session_does_not_wipe_active_sessions()
     test_abandoned_session_ages_out_even_while_another_session_stays_active()
     test_legacy_list_shaped_active_sessions_still_ages_out()
-    test_notification_status_not_overridden_while_session_active()
+    test_session_transitioning_from_trabalhando_to_esperando_voce_updates_status()
+    test_multiple_sessions_different_statuses_prioritizes_trabalhando()
+    test_multiple_sessions_prioritizes_esperando_decisao_over_esperando_voce()
     print("OK")

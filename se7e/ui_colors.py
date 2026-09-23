@@ -1,7 +1,16 @@
 from . import i18n
 
 STATUS_COLORS = {
-    "esperando voce": "#eab308",
+    # idle_prompt: Claude just finished and is waiting for your next
+    # message — not urgent, so it shares the neutral white the tray badge
+    # already uses for "something's active", distinct from a genuine
+    # "needs a decision" state.
+    "esperando voce": "#ffffff",
+    # permission_prompt/agent_needs_input/elicitation_*: Claude is
+    # blocked waiting on a decision from you specifically — the more
+    # urgent of the two waiting states, so it keeps the old amber color
+    # and blinks (see should_blink below) instead of sitting solid.
+    "esperando decisao": "#eab308",
     "parado": "#4b5160",
 }
 
@@ -29,7 +38,7 @@ def tray_icon_color(claude_status: str, codex_status: str) -> str:
 
 
 def should_blink(status: str, connected: bool = True) -> bool:
-    return connected and status == "trabalhando"
+    return connected and status in ("trabalhando", "esperando decisao")
 
 
 def format_pct(value, connected: bool = True, lang: str = i18n.DEFAULT_LANGUAGE) -> str:

@@ -11,9 +11,65 @@ from se7e import state_store
 def test_known_events_map_to_expected_status():
     assert hook.status_for_event("SessionStart") == "trabalhando"
     assert hook.status_for_event("UserPromptSubmit") == "trabalhando"
-    assert hook.status_for_event("Notification") == "esperando voce"
     assert hook.status_for_event("Stop") == "parado"
     assert hook.status_for_event("SessionEnd") == "parado"
+
+
+def test_notification_has_no_single_fixed_status():
+    """Notification's status depends on its notification_type payload
+    field (see the tests below), not a fixed EVENT_STATUS entry."""
+    assert hook.status_for_event("Notification") is None
+
+
+def _run_notification(notification_type, session_id="sess-1"):
+    """Runs hook.main("Notification") with a fake stdin payload, capturing
+    the (session_id, status) pair it would pass to mark_session_active.
+
+    Mocks the function itself rather than redirecting state_store.STATE_FILE:
+    mark_session_active's own `path` default parameter is bound to the
+    real STATE_FILE once, at state_store.py's import time — reassigning
+    state_store.STATE_FILE later (as a prior version of this test tried)
+    doesn't reach it, the same class of bug the real usage_claude.py
+    CREDENTIALS_PATH default-argument issue was."""
+    calls = []
+    original_read = hook._read_stdin_payload
+    original_mark_active = state_store.mark_session_active
+    hook._read_stdin_payload = lambda: {"session_id": session_id, "notification_type": notification_type}
+    state_store.mark_session_active = lambda sid, status, path=None: calls.append((sid, status))
+    try:
+        hook.main("Notification")
+    finally:
+        hook._read_stdin_payload = original_read
+        state_store.mark_session_active = original_mark_active
+    return calls
+
+
+def test_notification_permission_prompt_sets_esperando_decisao():
+    assert _run_notification("permission_prompt") == [("sess-1", "esperando decisao")]
+
+
+def test_notification_agent_needs_input_sets_esperando_decisao():
+    assert _run_notification("agent_needs_input") == [("sess-1", "esperando decisao")]
+
+
+def test_notification_elicitation_dialog_sets_esperando_decisao():
+    assert _run_notification("elicitation_dialog") == [("sess-1", "esperando decisao")]
+
+
+def test_notification_elicitation_url_dialog_sets_esperando_decisao():
+    assert _run_notification("elicitation_url_dialog") == [("sess-1", "esperando decisao")]
+
+
+def test_notification_idle_prompt_sets_esperando_voce():
+    assert _run_notification("idle_prompt") == [("sess-1", "esperando voce")]
+
+
+def test_notification_informational_types_are_ignored():
+    """agent_completed, auth_success, elicitation_complete, and
+    quota_auto_resume_* are informational, not a waiting state — must not
+    touch the tracked status at all."""
+    for notification_type in ("agent_completed", "auth_success", "elicitation_complete", "quota_auto_resume_5h"):
+        assert _run_notification(notification_type) == [], f"{notification_type} should not mark any session active"
 
 
 def test_tool_use_events_are_ignored():
@@ -62,6 +118,13 @@ def test_hook_invoked_as_bare_script_exits_zero_and_writes_status():
 
 if __name__ == "__main__":
     test_known_events_map_to_expected_status()
+    test_notification_has_no_single_fixed_status()
+    test_notification_permission_prompt_sets_esperando_decisao()
+    test_notification_agent_needs_input_sets_esperando_decisao()
+    test_notification_elicitation_dialog_sets_esperando_decisao()
+    test_notification_elicitation_url_dialog_sets_esperando_decisao()
+    test_notification_idle_prompt_sets_esperando_voce()
+    test_notification_informational_types_are_ignored()
     test_tool_use_events_are_ignored()
     test_hook_invoked_as_bare_script_exits_zero_and_writes_status()
     print("OK")
