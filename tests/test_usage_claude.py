@@ -120,10 +120,12 @@ def test_get_usage_backs_off_after_429_and_skips_the_next_call():
         original_until = usage_claude._rate_limit_until
         original_backoff = usage_claude._rate_limit_backoff
         original_fetch = usage_claude.fetch_usage
+        original_log = usage_claude._log_attempt
         usage_claude.read_access_token = lambda: original_read_token(path)
         usage_claude.read_expires_at = lambda: original_read_expires(path)
         usage_claude._rate_limit_until = 0.0
         usage_claude._rate_limit_backoff = 0
+        usage_claude._log_attempt = lambda *a, **k: None  # avoid writing the real usage_debug.log during tests
         calls = []
 
         def fake_fetch(token):
@@ -147,6 +149,7 @@ def test_get_usage_backs_off_after_429_and_skips_the_next_call():
             usage_claude.read_expires_at = original_read_expires
             usage_claude._rate_limit_until = original_until
             usage_claude._rate_limit_backoff = original_backoff
+            usage_claude._log_attempt = original_log
 
 
 def test_get_usage_success_resets_backoff():
@@ -160,10 +163,12 @@ def test_get_usage_success_resets_backoff():
         original_until = usage_claude._rate_limit_until
         original_backoff = usage_claude._rate_limit_backoff
         original_fetch = usage_claude.fetch_usage
+        original_log = usage_claude._log_attempt
         usage_claude.read_access_token = lambda: original_read_token(path)
         usage_claude.read_expires_at = lambda: original_read_expires(path)
         usage_claude._rate_limit_until = 0.0
         usage_claude._rate_limit_backoff = 30  # pretend a previous 429 already happened
+        usage_claude._log_attempt = lambda *a, **k: None  # avoid writing the real usage_debug.log during tests
 
         usage_claude.fetch_usage = lambda token: {"five_hour": 10, "week": 20}
         try:
@@ -177,6 +182,7 @@ def test_get_usage_success_resets_backoff():
             usage_claude.read_expires_at = original_read_expires
             usage_claude._rate_limit_until = original_until
             usage_claude._rate_limit_backoff = original_backoff
+            usage_claude._log_attempt = original_log
 
 
 if __name__ == "__main__":

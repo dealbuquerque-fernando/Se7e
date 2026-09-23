@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import state_store
+from .config import APP_DIR
 
 ENDPOINT = "https://chatgpt.com/backend-api/wham/usage"
 # Public: openai/codex's own codex-rs/core/src/auth.rs, and documented at
@@ -30,6 +31,27 @@ REFRESH_TIMEOUT_SECONDS = 15
 # Notification), so both providers settle into idle on the same rhythm:
 # working -> briefly parado -> esperando voce.
 IDLE_GRACE_SECONDS = 60
+
+# Temporary diagnostic trail for a reported bug: the "updated Ns ago" line
+# sometimes goes stale well past the normal 45s poll cycle. Shares
+# usage_debug.log with usage_claude.py's own _log_attempt (distinguished by
+# the "provider" field) so both providers' outcomes can be correlated on
+# the same timeline. Remove once the report is resolved.
+_USAGE_LOG_MAX_LINES = 500
+
+
+def _log_attempt(outcome: str, detail: str = "") -> None:
+    try:
+        log_path = APP_DIR / "usage_debug.log"
+        entry = {"ts": time.time(), "provider": "codex", "outcome": outcome, "detail": detail}
+        lines = []
+        if log_path.exists():
+            lines = log_path.read_text().splitlines()
+        lines.append(json.dumps(entry))
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("\n".join(lines[-_USAGE_LOG_MAX_LINES:]) + "\n")
+    except OSError:
+        pass
 
 # Codex has no way to signal "waiting on your approval" to an outside
 # program: the notify hook only fires on turn completion (open OpenAI
@@ -163,6 +185,7 @@ def get_usage() -> dict:
     try:
         credential = read_credential(AUTH_PATH)
         if credential is None:
+            _log_attempt("no_token")
             return {"connected": False, "five_hour": None, "week": None, "stale": False}
         expires_at = read_id_token_expiry(AUTH_PATH)
         if expires_at is not None and expires_at - time.time() < REFRESH_MARGIN_SECONDS:
@@ -172,17 +195,24 @@ def get_usage() -> dict:
             usage = fetch_usage(credential)
         except urllib.error.HTTPError as exc:
             if exc.code != 401:
+                _log_attempt("http_error", f"code={exc.code} reason={exc.reason}")
                 raise
             if not _refresh_via_oauth(AUTH_PATH):
+                _log_attempt("http_401_refresh_failed")
                 raise
             credential = read_credential(AUTH_PATH)
             if credential is None:
+                _log_attempt("http_401_no_credential_after_refresh")
                 raise
             usage = fetch_usage(credential)
+            _log_attempt("http_401_recovered_after_refresh")
         usage["connected"] = True
         usage["stale"] = False
+        _log_attempt("success")
         return usage
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, AttributeError, TypeError):
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, AttributeError, TypeError) as exc:
+        detail = getattr(exc, "reason", None) or str(exc)
+        _log_attempt(f"{type(exc).__name__}", str(detail))
         return {"connected": True, "five_hour": None, "week": None, "stale": True}
 
 

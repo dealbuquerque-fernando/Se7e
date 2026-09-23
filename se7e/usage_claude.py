@@ -7,6 +7,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from .config import APP_DIR
+
 ENDPOINT = "https://api.anthropic.com/api/oauth/usage"
 CREDENTIALS_PATH = Path.home() / ".claude" / ".credentials.json"
 KEYCHAIN_SERVICE = "Claude Code-credentials"
@@ -17,6 +19,28 @@ RATE_LIMIT_BACKOFF_CAP_SECONDS = 900
 
 _rate_limit_until = 0.0
 _rate_limit_backoff = 0
+
+# Temporary diagnostic trail for a reported bug: the "updated Ns ago" line
+# sometimes goes stale well past the normal 45s poll cycle, on Windows
+# persistently and on macOS at least occasionally. get_usage() logs one
+# line per outcome here — including the exact HTTP status / exception when
+# it fails — instead of that detail only ever surfacing as an
+# undifferentiated "stale" in the UI. Remove once the report is resolved.
+_USAGE_LOG_MAX_LINES = 500
+
+
+def _log_attempt(outcome: str, detail: str = "") -> None:
+    try:
+        log_path = APP_DIR / "usage_debug.log"
+        entry = {"ts": time.time(), "provider": "claude", "outcome": outcome, "detail": detail}
+        lines = []
+        if log_path.exists():
+            lines = log_path.read_text().splitlines()
+        lines.append(json.dumps(entry))
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("\n".join(lines[-_USAGE_LOG_MAX_LINES:]) + "\n")
+    except OSError:
+        pass
 
 
 def _read_credentials_from_keychain() -> dict | None:
@@ -137,10 +161,12 @@ def get_usage() -> dict:
     if time.time() < _rate_limit_until:
         # Still cooling down from a 429 — don't spend another attempt on it,
         # the endpoint's own Retry-After is 0 and useless.
+        _log_attempt("rate_limit_cooldown", f"until={_rate_limit_until}")
         return {"connected": True, "five_hour": None, "week": None, "stale": True}
     try:
         token = read_access_token()
         if token is None:
+            _log_attempt("no_token")
             return {"connected": False, "five_hour": None, "week": None, "stale": False}
         expires_at = read_expires_at()
         if expires_at is not None and expires_at - time.time() < REFRESH_MARGIN_SECONDS:
@@ -155,18 +181,25 @@ def get_usage() -> dict:
                     RATE_LIMIT_BACKOFF_CAP_SECONDS,
                 )
                 _rate_limit_until = time.time() + _rate_limit_backoff
+                _log_attempt("http_429", f"backoff={_rate_limit_backoff}")
                 return {"connected": True, "five_hour": None, "week": None, "stale": True}
             if exc.code != 401:
+                _log_attempt("http_error", f"code={exc.code} reason={exc.reason}")
                 raise
             _refresh_via_cli()
             token = read_access_token()
             if token is None:
+                _log_attempt("http_401_no_token_after_refresh")
                 raise
             usage = fetch_usage(token)
+            _log_attempt("http_401_recovered_after_refresh")
         usage["connected"] = True
         usage["stale"] = False
         _rate_limit_backoff = 0
         _rate_limit_until = 0.0
+        _log_attempt("success")
         return usage
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, AttributeError, TypeError):
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, AttributeError, TypeError) as exc:
+        detail = getattr(exc, "reason", None) or str(exc)
+        _log_attempt(f"{type(exc).__name__}", str(detail))
         return {"connected": True, "five_hour": None, "week": None, "stale": True}

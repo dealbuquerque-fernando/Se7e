@@ -181,11 +181,14 @@ def test_get_usage_malformed_tokens_shape_returns_fallback_not_raise():
         path = Path(d) / "auth.json"
         path.write_text('{"tokens": "not-an-object"}')
         original = usage_codex.AUTH_PATH
+        original_log = usage_codex._log_attempt
         usage_codex.AUTH_PATH = path
+        usage_codex._log_attempt = lambda *a, **k: None  # avoid writing the real usage_debug.log during tests
         try:
             result = usage_codex.get_usage()
         finally:
             usage_codex.AUTH_PATH = original
+            usage_codex._log_attempt = original_log
         assert result == {"connected": True, "five_hour": None, "week": None, "stale": True}
 
 
@@ -194,11 +197,14 @@ def test_get_usage_null_tokens_returns_fallback_not_raise():
         path = Path(d) / "auth.json"
         path.write_text('{"tokens": null}')
         original = usage_codex.AUTH_PATH
+        original_log = usage_codex._log_attempt
         usage_codex.AUTH_PATH = path
+        usage_codex._log_attempt = lambda *a, **k: None  # avoid writing the real usage_debug.log during tests
         try:
             result = usage_codex.get_usage()
         finally:
             usage_codex.AUTH_PATH = original
+            usage_codex._log_attempt = original_log
         assert result == {"connected": True, "five_hour": None, "week": None, "stale": True}
 
 
@@ -302,7 +308,9 @@ def test_get_usage_refreshes_proactively_when_near_expiry():
         original_auth_path = usage_codex.AUTH_PATH
         original_fetch = usage_codex.fetch_usage
         original_post = usage_codex._post_token_refresh
+        original_log = usage_codex._log_attempt
         usage_codex.AUTH_PATH = path
+        usage_codex._log_attempt = lambda *a, **k: None  # avoid writing the real usage_debug.log during tests
         seen_tokens = []
 
         def fake_post(refresh_token):
@@ -320,6 +328,7 @@ def test_get_usage_refreshes_proactively_when_near_expiry():
             usage_codex.AUTH_PATH = original_auth_path
             usage_codex.fetch_usage = original_fetch
             usage_codex._post_token_refresh = original_post
+            usage_codex._log_attempt = original_log
 
         assert result == {"five_hour": 5, "week": 10, "connected": True, "stale": False}
         assert seen_tokens == ["fresh-access"]  # used the refreshed token, not the stale one
@@ -341,7 +350,9 @@ def test_get_usage_refreshes_reactively_on_401():
         original_auth_path = usage_codex.AUTH_PATH
         original_fetch = usage_codex.fetch_usage
         original_post = usage_codex._post_token_refresh
+        original_log = usage_codex._log_attempt
         usage_codex.AUTH_PATH = path
+        usage_codex._log_attempt = lambda *a, **k: None  # avoid writing the real usage_debug.log during tests
         calls = []
 
         def fake_post(refresh_token):
@@ -361,6 +372,7 @@ def test_get_usage_refreshes_reactively_on_401():
             usage_codex.AUTH_PATH = original_auth_path
             usage_codex.fetch_usage = original_fetch
             usage_codex._post_token_refresh = original_post
+            usage_codex._log_attempt = original_log
 
         assert result == {"five_hour": 1, "week": 2, "connected": True, "stale": False}
         assert calls == ["expired-access", "fresh-access"]  # retried after refreshing
