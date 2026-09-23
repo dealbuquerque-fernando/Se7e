@@ -1,4 +1,5 @@
 import ctypes
+import random
 import subprocess
 import sys
 import threading
@@ -15,7 +16,19 @@ from .floating_ui_qt import FloatingWidget
 from .settings_window_qt import SettingsWindow
 from .tray_ui_qt import TrayPopup, make_icon_image
 
-USAGE_POLL_SECONDS = 45
+# Base interval between usage-percentage polls. Two independent instances
+# (e.g. this Mac and a Windows machine, same account) each count this from
+# their own launch time — if they tend to open around the same time, their
+# polls land within the same second on every cycle, doubling the request
+# load against the account's usage endpoint at that exact instant instead
+# of spreading it out. USAGE_POLL_JITTER_SECONDS below decorrelates them.
+USAGE_POLL_SECONDS = 60
+USAGE_POLL_JITTER_SECONDS = 10  # actual interval is USAGE_POLL_SECONDS +/- this, re-rolled every cycle
+# How long the "updated Ns ago" line waits before calling the data stale —
+# needs enough slack to absorb one missed poll (a single rate-limit cooldown
+# is 60s) without flashing stale for something that's about to self-correct
+# on its own within a cycle or two.
+USAGE_STALE_THRESHOLD_SECONDS = 180
 STATUS_POLL_SECONDS = 2
 # Same 300ms rate as the popup/floating dots' own blink timer
 # (tray_ui_qt.py's TrayPopup._ensure_blink_timer) — a separate loop from
@@ -85,6 +98,7 @@ class App:
         self.codex_status = "parado"
         self._tray_blink_on = True
         self.last_usage_poll = 0.0
+        self._next_usage_poll_interval = USAGE_POLL_SECONDS
         self.last_claude_usage_ok = 0.0
         self.last_codex_usage_ok = 0.0
         self._refresh_settings()
@@ -222,7 +236,7 @@ class App:
                 self.claude_status = state_store.read_claude_status()["status"]
                 self.codex_status = usage_codex.get_status()
                 now = time.time()
-                if now - self.last_usage_poll > USAGE_POLL_SECONDS:
+                if now - self.last_usage_poll > self._next_usage_poll_interval:
                     new_claude = usage_claude.get_usage()
                     new_codex = usage_codex.get_usage()
                     if not new_claude.get("stale"):
@@ -232,10 +246,13 @@ class App:
                         self.codex_usage = new_codex
                         self.last_codex_usage_ok = now
                     self.last_usage_poll = now
+                    self._next_usage_poll_interval = USAGE_POLL_SECONDS + random.uniform(
+                        -USAGE_POLL_JITTER_SECONDS, USAGE_POLL_JITTER_SECONDS
+                    )
                 elapsed = int(time.time() - self._oldest_connected_usage_ok())
                 updated_text = (
                     i18n.t("popup_updated_ago", self.lang, s=elapsed)
-                    if elapsed < 120
+                    if elapsed < USAGE_STALE_THRESHOLD_SECONDS
                     else i18n.t("popup_updated_stale", self.lang)
                 )
                 self._refresh_ui(self.claude_status, updated_text)
