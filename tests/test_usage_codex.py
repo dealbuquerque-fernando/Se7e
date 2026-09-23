@@ -76,12 +76,70 @@ def test_is_busy_false_when_no_active_turn():
     with tempfile.TemporaryDirectory() as d:
         db_path = Path(d) / "thread_history_1.sqlite"
         conn = sqlite3.connect(db_path)
-        conn.execute("CREATE TABLE thread_turns (status TEXT, completed_at TEXT)")
-        conn.execute("INSERT INTO thread_turns (status, completed_at) VALUES ('done', '2026-01-01')")
+        conn.execute("CREATE TABLE thread_turns (status TEXT, completed_at INTEGER)")
+        # A real, long-past Unix timestamp — completed_at is genuinely
+        # numeric in the real db (confirmed live), not a date string.
+        conn.execute("INSERT INTO thread_turns (status, completed_at) VALUES ('done', 0)")
         conn.commit()
         conn.close()
         assert usage_codex.is_busy(db_path) is False
+
+
+def test_get_status_just_finished_reads_as_parado():
+    """Mirrors Claude Code's own brief gray window right after its Stop
+    hook, before the idle_prompt Notification fires — a turn that
+    completed moments ago isn't "esperando voce" yet."""
+    with tempfile.TemporaryDirectory() as d:
+        db_path = Path(d) / "thread_history_1.sqlite"
+        conn = sqlite3.connect(db_path)
+        conn.execute("CREATE TABLE thread_turns (status TEXT, completed_at INTEGER)")
+        conn.execute("INSERT INTO thread_turns (status, completed_at) VALUES ('done', ?)", (int(time.time()),))
+        conn.commit()
+        conn.close()
         assert usage_codex.get_status(db_path) == "parado"
+
+
+def test_get_status_finished_a_while_ago_reads_as_esperando_voce():
+    with tempfile.TemporaryDirectory() as d:
+        db_path = Path(d) / "thread_history_1.sqlite"
+        conn = sqlite3.connect(db_path)
+        conn.execute("CREATE TABLE thread_turns (status TEXT, completed_at INTEGER)")
+        old = int(time.time()) - usage_codex.IDLE_GRACE_SECONDS - 1
+        conn.execute("INSERT INTO thread_turns (status, completed_at) VALUES ('done', ?)", (old,))
+        conn.commit()
+        conn.close()
+        assert usage_codex.get_status(db_path) == "esperando voce"
+
+
+def test_get_status_never_used_reads_as_parado():
+    with tempfile.TemporaryDirectory() as d:
+        db_path = Path(d) / "thread_history_1.sqlite"
+        conn = sqlite3.connect(db_path)
+        conn.execute("CREATE TABLE thread_turns (status TEXT, completed_at INTEGER)")
+        conn.commit()
+        conn.close()
+        assert usage_codex.get_status(db_path) == "parado"
+
+
+def test_get_status_missing_db_reads_as_parado():
+    with tempfile.TemporaryDirectory() as d:
+        missing = Path(d) / "does-not-exist.sqlite"
+        assert usage_codex.get_status(missing) == "parado"
+
+
+def test_get_status_busy_wins_over_a_recently_completed_turn():
+    """A new turn starting shortly after a previous one finished must
+    show trabalhando, not get stuck on the old turn's completed_at."""
+    with tempfile.TemporaryDirectory() as d:
+        db_path = Path(d) / "thread_history_1.sqlite"
+        conn = sqlite3.connect(db_path)
+        conn.execute("CREATE TABLE thread_turns (status TEXT, completed_at INTEGER)")
+        old = int(time.time()) - usage_codex.IDLE_GRACE_SECONDS - 1
+        conn.execute("INSERT INTO thread_turns (status, completed_at) VALUES ('done', ?)", (old,))
+        conn.execute("INSERT INTO thread_turns (status, completed_at) VALUES ('inProgress', NULL)")
+        conn.commit()
+        conn.close()
+        assert usage_codex.get_status(db_path) == "trabalhando"
 
 
 def test_is_busy_missing_db_returns_false():
@@ -290,6 +348,11 @@ if __name__ == "__main__":
     test_read_credential_complete()
     test_is_busy_true_when_turn_in_progress()
     test_is_busy_false_when_no_active_turn()
+    test_get_status_just_finished_reads_as_parado()
+    test_get_status_finished_a_while_ago_reads_as_esperando_voce()
+    test_get_status_never_used_reads_as_parado()
+    test_get_status_missing_db_reads_as_parado()
+    test_get_status_busy_wins_over_a_recently_completed_turn()
     test_is_busy_missing_db_returns_false()
     test_get_usage_malformed_tokens_shape_returns_fallback_not_raise()
     test_decode_id_token_exp_reads_exp_claim()

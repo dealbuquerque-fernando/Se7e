@@ -22,13 +22,21 @@ AUTH_PATH = CODEX_HOME / "auth.json"
 THREAD_DB_PATH = CODEX_HOME / "thread_history_1.sqlite"
 REFRESH_MARGIN_SECONDS = 60
 REFRESH_TIMEOUT_SECONDS = 15
+# How long a just-finished turn still reads as "parado" before flipping to
+# "esperando voce" — mirrors Claude Code's own idle_prompt delay (measured
+# live: ~60s from its Stop hook to the "Claude is waiting for your input"
+# Notification), so both providers settle into idle on the same rhythm:
+# working -> briefly parado -> esperando voce.
+IDLE_GRACE_SECONDS = 60
 
-# Codex has no way to signal "waiting on your approval" to an outside program:
-# the notify hook only fires on turn completion (open OpenAI feature requests
-# #11808/#6024/#3247/#14813 ask for approval events and remain unimplemented),
-# and no local Codex database records an approval-pending state either —
-# checked thread_turns, thread_items and thread_realtime_items directly.
-# So Codex only ever reports busy/idle, never a third "waiting" state.
+# Codex has no way to signal "waiting on your approval" to an outside
+# program: the notify hook only fires on turn completion (open OpenAI
+# feature requests #11808/#3052/#19921 ask for approval events too and
+# remain unimplemented), and no local Codex database records an
+# approval-pending state either — checked thread_turns, thread_items and
+# thread_realtime_items directly. So Codex can't distinguish "esperando
+# decisao" from plain idle the way Claude's notification_type does; it
+# only ever reports trabalhando/parado/esperando voce.
 
 
 def read_credential(path: Path = AUTH_PATH):
@@ -194,5 +202,31 @@ def is_busy(db_path: Path = THREAD_DB_PATH) -> bool:
         conn.close()
 
 
+def _last_completed_turn_at(db_path: Path = THREAD_DB_PATH):
+    """Unix timestamp (seconds) the most recently completed turn finished
+    at, or None if the db doesn't exist or no turn has ever completed."""
+    if not db_path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        cursor = conn.execute("SELECT MAX(completed_at) FROM thread_turns WHERE completed_at IS NOT NULL")
+        row = cursor.fetchone()
+        return row[0] if row else None
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+
+
 def get_status(db_path: Path = THREAD_DB_PATH) -> str:
-    return "trabalhando" if is_busy(db_path) else "parado"
+    if is_busy(db_path):
+        return "trabalhando"
+    last_completed = _last_completed_turn_at(db_path)
+    if last_completed is None:
+        return "parado"  # never used Codex, or the db doesn't exist yet
+    if time.time() - last_completed < IDLE_GRACE_SECONDS:
+        return "parado"  # just finished — same brief window Claude has right after its own Stop
+    return "esperando voce"
