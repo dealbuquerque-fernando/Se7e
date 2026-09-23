@@ -22,7 +22,7 @@ APP_NAME="Se7e"
 APP_PATH="$ROOT/dist/$APP_NAME.app"
 PKG_PATH="$ROOT/dist/$APP_NAME.pkg"
 IDENTIFIER="com.se7e.app"
-VERSION="1.3.4"
+VERSION="1.3.5"
 
 if [[ ! -d "$APP_PATH" ]]; then
     echo "error: $APP_PATH not found — run 'pyinstaller packaging/se7e.spec' first" >&2
