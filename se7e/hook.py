@@ -1,5 +1,6 @@
 import json
 import sys
+import time
 from pathlib import Path
 
 try:
@@ -7,6 +8,42 @@ try:
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from se7e import state_store
+
+# Temporary diagnostic trail for a reported bug: the "esperando voce" white
+# sometimes doesn't show up even well past its usual ~60s delay. Every hook
+# invocation appends one line here with what it received and what it did,
+# plus active_sessions right after — so a stuck phantom session (from a
+# terminal killed uncleanly, never getting its own Stop/SessionEnd) or a
+# Notification that simply never arrives shows up directly in the log,
+# instead of only being guessable from the final aggregated status.
+# Remove this once the report is resolved.
+_LOG_MAX_LINES = 500
+
+
+def _log(event, session_key, notification_type, status, path: Path | None = None) -> None:
+    try:
+        log_path = path or (state_store.STATE_FILE.parent / "hook_debug.log")
+        # Explicit path, not read_all()'s own default: that default is bound
+        # to STATE_FILE's value at state_store.py's import time, so it
+        # wouldn't follow a STATE_FILE reassigned afterward (the same class
+        # of bug documented on mark_session_active's own path default).
+        snapshot = state_store.read_all(state_store.STATE_FILE).get("claude", {}).get("active_sessions", {})
+        entry = {
+            "ts": time.time(),
+            "event": event,
+            "session_key": session_key,
+            "notification_type": notification_type,
+            "status": status,
+            "active_sessions": snapshot,
+        }
+        lines = []
+        if log_path.exists():
+            lines = log_path.read_text().splitlines()
+        lines.append(json.dumps(entry))
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("\n".join(lines[-_LOG_MAX_LINES:]) + "\n")
+    except OSError:
+        pass
 
 EVENT_STATUS = {
     "SessionStart": "trabalhando",
@@ -74,15 +111,19 @@ def main(event: str | None = None) -> None:
     try:
         if event == "Notification":
             payload = _read_stdin_payload()
-            status = _notification_status(payload.get("notification_type"))
-            if status is None:
-                return
+            notification_type = payload.get("notification_type")
+            status = _notification_status(notification_type)
             session_key = payload.get("session_id") or "unknown"
+            if status is None:
+                _log(event, session_key, notification_type, None)
+                return
             state_store.mark_session_active(session_key, status)
+            _log(event, session_key, notification_type, status)
             return
 
         status = status_for_event(event)
         if status is None:
+            _log(event, None, None, None)
             return
 
         if event in _ACTIVE_EVENTS or event in _INACTIVE_EVENTS:
@@ -103,8 +144,10 @@ def main(event: str | None = None) -> None:
                 state_store.mark_session_active(session_key, status)
             else:
                 state_store.mark_session_inactive(session_key)
+            _log(event, session_key, None, status)
         else:
             state_store.write_claude_status(status)
+            _log(event, None, None, status)
     except OSError:
         pass
 

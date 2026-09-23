@@ -34,13 +34,16 @@ def _run_notification(notification_type, session_id="sess-1"):
     calls = []
     original_read = hook._read_stdin_payload
     original_mark_active = state_store.mark_session_active
+    original_log = hook._log
     hook._read_stdin_payload = lambda: {"session_id": session_id, "notification_type": notification_type}
     state_store.mark_session_active = lambda sid, status, path=None: calls.append((sid, status))
+    hook._log = lambda *a, **k: None  # avoid writing the real hook_debug.log during tests
     try:
         hook.main("Notification")
     finally:
         hook._read_stdin_payload = original_read
         state_store.mark_session_active = original_mark_active
+        hook._log = original_log
     return calls
 
 
