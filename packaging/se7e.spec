@@ -55,7 +55,7 @@ if is_macos:
         icon=str(icon_path),
         bundle_identifier="com.se7e.app",
         info_plist={
-            "CFBundleShortVersionString": "1.3.1",
+            "CFBundleShortVersionString": "1.3.2",
             # A tray-only app: no Dock icon, no menu bar, matching the
             # Windows build's own no-taskbar-window presence.
             "LSUIElement": True,
