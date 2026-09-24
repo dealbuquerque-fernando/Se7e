@@ -377,6 +377,7 @@ class _TrayPanel(QWidget):
 
         self.title_label = QLabel(self)
         self.updated_label = QLabel(self)
+        self.reload_button = QPushButton("↻", self)  # universal reload glyph, not translated
 
         self.claude_row = _ProviderRow(
             "claude",
@@ -406,6 +407,7 @@ class _TrayPanel(QWidget):
         )
         self.hide_button.clicked.connect(popup.hide)
         self.quit_button.clicked.connect(popup._on_quit)
+        self.reload_button.clicked.connect(popup._on_reload_usage)
 
         self._set_geometry()
         self.apply_theme()
@@ -421,7 +423,11 @@ class _TrayPanel(QWidget):
 
     def _set_geometry(self) -> None:
         self.title_label.setGeometry(14, 14, 100, 14)
-        self.updated_label.setGeometry(114, 14, 172, 14)
+        # Narrower than before (was 172) to make room for reload_button —
+        # only visible while stale, so it sits right after the text with
+        # no gap when hidden.
+        self.updated_label.setGeometry(114, 14, 154, 14)
+        self.reload_button.setGeometry(270, 11, 16, 16)
 
         self.claude_row.setGeometry(14, 45, 272, 39)
         self.codex_row.setGeometry(14, 88, 272, 39)
@@ -500,6 +506,22 @@ class _TrayPanel(QWidget):
             """
         )
 
+        self.reload_button.setFont(_font(11))
+        self.reload_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.reload_button.setStyleSheet(
+            f"""
+            QPushButton {{
+                border: none;
+                background: transparent;
+                color: {colors["muted"]};
+                padding: 0;
+            }}
+            QPushButton:hover {{
+                color: {colors["secondary"]};
+            }}
+            """
+        )
+
         self.claude_row.update()
         self.codex_row.update()
         QWidget.update(self)
@@ -519,6 +541,7 @@ class _TrayPanel(QWidget):
         )
         self.hide_button.setText(strings["popup_btn_hide"])
         self.quit_button.setText(strings["popup_btn_quit"])
+        self.reload_button.setToolTip(strings["popup_btn_reload_usage"])
 
         self.claude_row.update()
         self.codex_row.update()
@@ -537,6 +560,9 @@ class _TrayPanel(QWidget):
     def refresh(self) -> None:
         self.updated_label.setText(
             self.popup._state["updated_text"]
+        )
+        self.reload_button.setVisible(
+            self.popup._state["stale"]
         )
         self.set_actions_visible(
             self.popup._actions_expanded
@@ -591,6 +617,7 @@ class TrayPopup:
         on_toggle_floating,
         on_toggle_transparent,
         on_quit,
+        on_reload_usage=None,
         title: str = "Se7e",
         lang: str = i18n.DEFAULT_LANGUAGE,
         theme: str = "dark",
@@ -610,6 +637,7 @@ class TrayPopup:
         self._on_toggle_floating = on_toggle_floating
         self._on_toggle_transparent = on_toggle_transparent
         self._on_quit = on_quit
+        self._on_reload_usage = on_reload_usage or (lambda: None)
 
         self._state = {
             "claude_status": "parado",
@@ -621,6 +649,7 @@ class TrayPopup:
             "codex_week": None,
             "codex_connected": True,
             "updated_text": "atualizado ha --s",
+            "stale": False,
         }
 
         self._blink_timer: QTimer | None = None
@@ -832,6 +861,7 @@ class TrayPopup:
         updated_text,
         claude_connected: bool = True,
         codex_connected: bool = True,
+        stale: bool = False,
     ) -> None:
         self._state.update(
             claude_status=claude_status,
@@ -843,6 +873,7 @@ class TrayPopup:
             codex_week=codex_week,
             codex_connected=codex_connected,
             updated_text=updated_text,
+            stale=stale,
         )
 
         if self.window is not None:

@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import subprocess
 from se7e import app as app_module
 from se7e import autostart
+from se7e import usage_claude
 
 
 def _bare_app():
@@ -125,6 +126,22 @@ def test_tray_icon_color_stays_solid_while_only_idle():
     assert second == expected
 
 
+def test_force_usage_refresh_clears_rate_limit_cooldown_and_poll_timer():
+    """The popup's manual reload button: must skip both the periodic poll
+    wait and Claude's own 429 backoff, so the very next poll_loop tick
+    retries immediately instead of waiting out up to 900s."""
+    instance = _bare_app()
+    instance.last_usage_poll = 999999999.0
+    original_until = usage_claude._rate_limit_until
+    usage_claude._rate_limit_until = 999999999.0
+    try:
+        instance.force_usage_refresh()
+        assert instance.last_usage_poll == 0.0
+        assert usage_claude._rate_limit_until == 0.0
+    finally:
+        usage_claude._rate_limit_until = original_until
+
+
 def test_oldest_connected_usage_ok_missing_connected_key_defaults_true():
     """Before the very first successful poll, claude_usage/codex_usage are
     still their __init__ placeholders with no "connected" key at all —
@@ -146,4 +163,5 @@ if __name__ == "__main__":
     test_oldest_connected_usage_ok_missing_connected_key_defaults_true()
     test_tray_icon_color_blinks_while_working()
     test_tray_icon_color_stays_solid_while_only_idle()
+    test_force_usage_refresh_clears_rate_limit_cooldown_and_poll_timer()
     print("OK")

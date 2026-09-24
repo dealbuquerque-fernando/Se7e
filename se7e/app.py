@@ -103,7 +103,12 @@ class App:
         self.last_codex_usage_ok = 0.0
         self._refresh_settings()
         self.popup = TrayPopup(
-            self.toggle_floating, self.toggle_transparent, self.quit, lang=self.lang, theme=self.theme
+            self.toggle_floating,
+            self.toggle_transparent,
+            self.quit,
+            on_reload_usage=self.force_usage_refresh,
+            lang=self.lang,
+            theme=self.theme,
         )
         self.settings = SettingsWindow(
             lang=self.lang,
@@ -250,16 +255,29 @@ class App:
                         -USAGE_POLL_JITTER_SECONDS, USAGE_POLL_JITTER_SECONDS
                     )
                 elapsed = int(time.time() - self._oldest_connected_usage_ok())
+                stale = elapsed >= USAGE_STALE_THRESHOLD_SECONDS
                 updated_text = (
-                    i18n.t("popup_updated_ago", self.lang, s=elapsed)
-                    if elapsed < USAGE_STALE_THRESHOLD_SECONDS
-                    else i18n.t("popup_updated_stale", self.lang)
+                    i18n.t("popup_updated_stale", self.lang)
+                    if stale
+                    else i18n.t("popup_updated_ago", self.lang, s=elapsed)
                 )
-                self._refresh_ui(self.claude_status, updated_text)
+                self._refresh_ui(self.claude_status, updated_text, stale)
             except Exception:
                 pass  # ponytail: never let one bad poll kill the loop
             if self.shutdown_event.wait(STATUS_POLL_SECONDS):
                 return
+
+    def force_usage_refresh(self) -> None:
+        """The popup's manual reload button, shown only while stale: skips
+        both the periodic poll interval and Claude's own rate-limit
+        cooldown, so the very next poll_loop tick (within
+        STATUS_POLL_SECONDS) retries right away instead of waiting out the
+        rest of an exponential backoff that can run up to 900s. Still
+        subject to the same real 429 from Anthropic's side if the account
+        is still rate-limited — this lets you choose when to spend that
+        retry, not bypass the limit itself."""
+        usage_claude._rate_limit_until = 0.0
+        self.last_usage_poll = 0.0
 
     def _tray_icon_color(self) -> str:
         """The active color, held solid while only "esperando voce" (idle)
@@ -306,8 +324,8 @@ class App:
         ]
         return min(connected_ok_times) if connected_ok_times else 0.0
 
-    def _refresh_ui(self, claude_status: str, updated_text: str) -> None:
-        if self._queue_on_gui(lambda: self._refresh_ui(claude_status, updated_text)):
+    def _refresh_ui(self, claude_status: str, updated_text: str, stale: bool = False) -> None:
+        if self._queue_on_gui(lambda: self._refresh_ui(claude_status, updated_text, stale)):
             return
         with self._ui_lock:
             self.popup.update(
@@ -316,6 +334,7 @@ class App:
                 updated_text,
                 claude_connected=self.claude_usage.get("connected", True),
                 codex_connected=self.codex_usage.get("connected", True),
+                stale=stale,
             )
             if self.floating is not None:
                 self.floating.update(
