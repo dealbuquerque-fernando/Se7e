@@ -104,6 +104,51 @@ def _run_subagent_event(event, session_id="sess-1", agent_id=None):
     return active_calls, inactive_calls
 
 
+def _run_session_start(source=None, session_id="sess-1"):
+    """Runs hook.main("SessionStart") with a fake payload, capturing what
+    it would pass to mark_session_active."""
+    calls = []
+    original_read = hook._read_stdin_payload
+    original_mark_active = state_store.mark_session_active
+    original_log = hook._log
+    payload = {"session_id": session_id}
+    if source is not None:
+        payload["source"] = source
+    hook._read_stdin_payload = lambda: payload
+    state_store.mark_session_active = lambda sid, status, path=None: calls.append((sid, status))
+    hook._log = lambda *a, **k: None
+    try:
+        hook.main("SessionStart")
+    finally:
+        hook._read_stdin_payload = original_read
+        state_store.mark_session_active = original_mark_active
+        hook._log = original_log
+    return calls
+
+
+def test_session_start_fresh_startup_sets_trabalhando():
+    assert _run_session_start("startup") == [("sess-1", "trabalhando")]
+
+
+def test_session_start_missing_source_defaults_to_trabalhando():
+    """Degrades to the pre-"source" behavior if a payload ever lacks it
+    (older Claude Code version, or an undocumented edge case)."""
+    assert _run_session_start(None) == [("sess-1", "trabalhando")]
+
+
+def test_session_start_resume_sets_esperando_voce():
+    """The bug this exists to fix: reopening an existing session via
+    `claude --continue`/`--resume` (confirmed live: source == "resume")
+    showed "trabalhando" the instant the terminal opened, even though
+    nothing had actually happened yet."""
+    assert _run_session_start("resume") == [("sess-1", "esperando voce")]
+
+
+def test_session_start_clear_compact_fork_set_esperando_voce():
+    for source in ("clear", "compact", "fork"):
+        assert _run_session_start(source) == [("sess-1", "esperando voce")], source
+
+
 def test_subagent_start_keys_on_agent_id_when_present():
     active, _ = _run_subagent_event("SubagentStart", session_id="sess-1", agent_id="agent-abc")
     assert active == [("sess-1:agent-abc", "trabalhando")]
@@ -189,6 +234,10 @@ if __name__ == "__main__":
     test_notification_elicitation_url_dialog_sets_esperando_decisao()
     test_notification_idle_prompt_sets_esperando_voce()
     test_notification_informational_types_are_ignored()
+    test_session_start_fresh_startup_sets_trabalhando()
+    test_session_start_missing_source_defaults_to_trabalhando()
+    test_session_start_resume_sets_esperando_voce()
+    test_session_start_clear_compact_fork_set_esperando_voce()
     test_subagent_start_keys_on_agent_id_when_present()
     test_subagent_stop_keys_on_agent_id_when_present()
     test_two_concurrent_subagents_get_independent_keys()

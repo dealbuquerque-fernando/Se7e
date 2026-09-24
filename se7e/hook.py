@@ -75,9 +75,24 @@ _IDLE_NOTIFICATION_TYPES = {"idle_prompt"}
 # state): elicitation_complete, agent_completed, auth_success,
 # quota_auto_resume_*, and anything else Claude Code might add.
 
+# SessionStart's payload carries a "source" field (confirmed live via a
+# captured real payload) with one of: startup, resume, clear, compact,
+# fork. Only a genuinely new session (startup) means you're likely about
+# to type something within seconds — reopening an existing one via
+# `claude --continue`/`--resume` (source: resume; same for clear/compact/
+# fork) doesn't mean anything is actually happening yet, so it shouldn't
+# preemptively show "trabalhando" the instant the terminal opens.
+_FRESH_SESSION_SOURCES = {"startup"}
+
 
 def status_for_event(event: str):
     return EVENT_STATUS.get(event)
+
+
+def _session_start_status(source):
+    if source is None or source in _FRESH_SESSION_SOURCES:
+        return "trabalhando"
+    return "esperando voce"
 
 
 def _read_stdin_payload() -> dict:
@@ -129,6 +144,8 @@ def main(event: str | None = None) -> None:
         if event in _ACTIVE_EVENTS or event in _INACTIVE_EVENTS:
             payload = _read_stdin_payload()
             session_key = payload.get("session_id") or "unknown"
+            if event == "SessionStart":
+                status = _session_start_status(payload.get("source"))
             if event in ("SubagentStart", "SubagentStop"):
                 # agent_id is a required field on SubagentStart/SubagentStop
                 # (code.claude.com/docs/en/hooks) — a unique id per subagent
