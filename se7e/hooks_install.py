@@ -1,6 +1,9 @@
 import json
+import sys
 import time
 from pathlib import Path
+
+from .config import TOOL_END_FILE, TOOL_START_FILE
 
 MARKER = "se7e"
 
@@ -13,6 +16,26 @@ WIRING = [
     ("SessionEnd", False),
     ("SubagentStop", False),
 ]
+
+# PreToolUse/PostToolUse fire on every single tool call — wiring them to
+# the packaged app binary like every event above would add real, blocking
+# delay to every tool use: measured live, ~0.7-0.74s per invocation,
+# entirely the cost of starting the bundled Python/Qt runtime from
+# scratch, not the hook's own trivial logic. A native OS command that just
+# updates a file's mtime costs ~0.01s instead — state_store.py's own
+# read_claude_status() reads that mtime directly, no Se7e code needs to
+# run inside the hook itself for these two.
+_TOUCH_WIRING = [
+    ("PreToolUse", TOOL_START_FILE),
+    ("PostToolUse", TOOL_END_FILE),
+]
+
+
+def _touch_command(path: Path) -> str:
+    quoted = f'"{path}"'
+    if sys.platform == "win32":
+        return f"type nul > {quoted}"
+    return f"touch {quoted}"
 
 
 def settings_path() -> Path:
@@ -78,8 +101,14 @@ def install(hook_command: str, path: Path = None) -> str:
             entry["matcher"] = "*"
         existing.append(entry)
         root["hooks"][event] = existing
+    for event, touch_path in _TOUCH_WIRING:
+        existing = [e for e in root["hooks"].get(event, []) if not _is_ours(e)]
+        entry = {"hooks": [{"type": "command", "command": _touch_command(touch_path), "timeout": 2}]}
+        existing.append(entry)
+        root["hooks"][event] = existing
+    total = len(WIRING) + len(_TOUCH_WIRING)
     _backup_and_write(path, root)
-    return f"wrote {path} ({len(WIRING)} events)"
+    return f"wrote {path} ({total} events)"
 
 
 def uninstall(path: Path = None) -> str:

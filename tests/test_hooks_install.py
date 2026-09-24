@@ -8,7 +8,7 @@ from se7e import hooks_install
 COMMAND = 'python "C:\\se7e\\hook.py"'
 
 
-def test_install_writes_only_the_narrow_event_set():
+def test_install_writes_the_full_event_set():
     with tempfile.TemporaryDirectory() as d:
         path = Path(d) / "settings.json"
         hooks_install.install(COMMAND, path=path)
@@ -16,9 +16,24 @@ def test_install_writes_only_the_narrow_event_set():
         assert set(data["hooks"].keys()) == {
             "SessionStart", "UserPromptSubmit", "SubagentStart",
             "Notification", "Stop", "SessionEnd", "SubagentStop",
+            "PreToolUse", "PostToolUse",
         }
-        assert "PreToolUse" not in data["hooks"]
-        assert "PostToolUse" not in data["hooks"]
+
+
+def test_pre_and_post_tool_use_run_a_native_touch_command_not_the_app_binary():
+    """PreToolUse/PostToolUse fire on every tool call — they must use a
+    near-instant native OS command (see hooks_install._touch_command),
+    never the packaged app binary (COMMAND here), which costs ~0.7s per
+    invocation and would add real, blocking delay to every tool use."""
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "settings.json"
+        hooks_install.install(COMMAND, path=path)
+        data = json.loads(path.read_text())
+        for event in ("PreToolUse", "PostToolUse"):
+            commands = [h["command"] for entry in data["hooks"][event] for h in entry["hooks"]]
+            assert len(commands) == 1
+            assert COMMAND not in commands[0]
+            assert "touch" in commands[0] or "type nul" in commands[0]
 
 
 def test_install_backs_up_existing_file():
@@ -154,7 +169,8 @@ def test_is_installed_returns_false_on_corrupt_json():
 
 
 if __name__ == "__main__":
-    test_install_writes_only_the_narrow_event_set()
+    test_install_writes_the_full_event_set()
+    test_pre_and_post_tool_use_run_a_native_touch_command_not_the_app_binary()
     test_install_backs_up_existing_file()
     test_install_preserves_other_tools_hooks()
     test_uninstall_removes_only_our_entries()

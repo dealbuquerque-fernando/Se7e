@@ -9,6 +9,11 @@ else:
 STATE_FILE = APP_DIR / "state.json"
 FLOATING_POSITION_FILE = APP_DIR / "floating_position.json"
 SETTINGS_FILE = APP_DIR / "settings.json"
+# Touched (mtime only, empty content) by a native OS command wired directly
+# into PreToolUse/PostToolUse — see hooks_install.py's _touch_command() for
+# why these two skip the packaged app binary entirely.
+TOOL_START_FILE = APP_DIR / "tool_start"
+TOOL_END_FILE = APP_DIR / "tool_end"
 
 
 def resource_dir() -> Path:

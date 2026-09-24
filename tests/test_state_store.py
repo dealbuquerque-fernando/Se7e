@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import time
 from pathlib import Path
@@ -154,6 +155,77 @@ def test_multiple_sessions_different_statuses_prioritizes_trabalhando():
         assert result["status"] == "trabalhando"
 
 
+def _touch(path: Path, mtime: float | None = None) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("")
+    if mtime is not None:
+        os.utime(path, (mtime, mtime))
+
+
+def test_tool_activity_promotes_parado_to_trabalhando_when_recent():
+    """The bug this exists to fix: Stop firing before a response actually
+    finishes (e.g. right before the user runs a "!" shell command whose
+    output resumes the same turn) left the status stuck on parado with no
+    UserPromptSubmit to mark it active again — a recent tool call must
+    promote it back to trabalhando on its own."""
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "state.json"
+        state_store.mark_session_active("main", "trabalhando", path=path)
+        state_store.mark_session_inactive("main", path=path)  # premature Stop
+        now = time.time()
+        _touch(Path(d) / "tool_start", mtime=now)  # a tool ran just after the premature Stop
+        result = state_store.read_claude_status(path=path)
+        assert result["status"] == "trabalhando"
+
+
+def test_tool_activity_in_progress_with_no_end_file_yet_counts_as_trabalhando():
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "state.json"
+        state_store.mark_session_active("main", "trabalhando", path=path)
+        state_store.mark_session_inactive("main", path=path)
+        _touch(Path(d) / "tool_start")  # PreToolUse fired, PostToolUse hasn't yet
+        result = state_store.read_claude_status(path=path)
+        assert result["status"] == "trabalhando"
+
+
+def test_tool_activity_older_than_grace_window_does_not_override_parado():
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "state.json"
+        state_store.mark_session_active("main", "trabalhando", path=path)
+        state_store.mark_session_inactive("main", path=path)
+        now = time.time()
+        old = now - state_store.TOOL_IDLE_GRACE_SECONDS - 5
+        _touch(Path(d) / "tool_start", mtime=old)
+        _touch(Path(d) / "tool_end", mtime=old)
+        result = state_store.read_claude_status(path=path)
+        assert result["status"] == "parado"
+
+
+def test_tool_activity_does_not_override_esperando_decisao():
+    """A pending permission decision is more specific/urgent than raw tool
+    activity and must not be masked by it."""
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "state.json"
+        state_store.mark_session_active("main", "esperando decisao", path=path)
+        now = time.time()
+        _touch(Path(d) / "tool_start", mtime=now)
+        result = state_store.read_claude_status(path=path)
+        assert result["status"] == "esperando decisao"
+
+
+def test_tool_activity_older_than_the_last_status_change_is_ignored():
+    """A stale tool_start/tool_end from an earlier, already-resolved gap
+    must not resurrect trabalhando after a genuinely newer status change."""
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "state.json"
+        old_tool_time = time.time() - 1
+        _touch(Path(d) / "tool_start", mtime=old_tool_time)
+        _touch(Path(d) / "tool_end", mtime=old_tool_time)
+        state_store.mark_session_active("main", "esperando voce", path=path)  # newer than the tool activity
+        result = state_store.read_claude_status(path=path)
+        assert result["status"] == "esperando voce"
+
+
 def test_multiple_sessions_prioritizes_esperando_decisao_over_esperando_voce():
     """Session A just idle-waiting + Session B needs an actual decision ->
     the dot shows "esperando decisao" (more urgent than plain idle)."""
@@ -179,4 +251,9 @@ if __name__ == "__main__":
     test_session_transitioning_from_trabalhando_to_esperando_voce_updates_status()
     test_multiple_sessions_different_statuses_prioritizes_trabalhando()
     test_multiple_sessions_prioritizes_esperando_decisao_over_esperando_voce()
+    test_tool_activity_promotes_parado_to_trabalhando_when_recent()
+    test_tool_activity_in_progress_with_no_end_file_yet_counts_as_trabalhando()
+    test_tool_activity_older_than_grace_window_does_not_override_parado()
+    test_tool_activity_does_not_override_esperando_decisao()
+    test_tool_activity_older_than_the_last_status_change_is_ignored()
     print("OK")
